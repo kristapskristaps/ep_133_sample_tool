@@ -4,9 +4,21 @@ Fork: https://github.com/kristapskristaps/ep_133_sample_tool
 
 ## Implemented first
 
+### Feature sidebar
+
+The fork adds a single right-side `EP Tools` sidebar loaded from `data/feature-sidebar.js` and `data/feature-sidebar.css`.
+
+The sidebar owns the visual shell and tab navigation for the added tools:
+
+- `DSP`
+- `Sample`
+- `Kit`
+
+Feature modules register their content into this sidebar instead of creating separate floating panels or bottom drawers.
+
 ### Offline DSP on transfer
 
-The fork adds a browser-side `Offline DSP` panel loaded from `data/dsp.js` and `data/dsp.css`.
+The fork adds browser-side DSP controls in the `DSP` sidebar tab.
 
 Current transfer-time processing:
 
@@ -35,7 +47,7 @@ Still missing for a full DSP workstation:
 
 ### Kit inspector and quick kit upload
 
-The fork adds a `Kit Inspector` panel loaded from `data/kit-inspector.js` and `data/kit-inspector.css`.
+The fork adds a kit inspector in the `Kit` sidebar tab.
 
 Current kit workflow:
 
@@ -51,7 +63,7 @@ The inspector uses a small bridge inserted into the bundled app so it can call t
 
 ### Sampler mode
 
-The fork adds a `Sample` drawer loaded from `data/sampler.js` and `data/sampler.css`.
+The fork adds sampler mode in the `Sample` sidebar tab.
 
 Current sampler workflow:
 

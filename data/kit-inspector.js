@@ -392,12 +392,7 @@
   function buildPanel() {
     const panel = document.createElement("section");
     panel.id = "ep133-kit-inspector";
-    panel.className = "ep133-utility-drawer collapsed";
     panel.innerHTML = `
-      <header>
-        <span>Kit</span>
-        <button type="button" id="ep133-kit-toggle">open</button>
-      </header>
       <div id="ep133-kit-body">
         <div class="ep133-kit-row" id="ep133-kit-projects"></div>
         <div class="ep133-kit-row" id="ep133-kit-groups"></div>
@@ -409,18 +404,12 @@
         </div>
       </div>
     `;
-    document.body.append(panel);
     ui.panel = panel;
     ui.body = byId("ep133-kit-body");
     ui.pads = byId("ep133-kit-pads");
     ui.status = byId("ep133-kit-status");
     ui.drop = byId("ep133-kit-drop");
 
-    byId("ep133-kit-toggle").addEventListener("click", () => {
-      panel.classList.toggle("collapsed");
-      panel.classList.toggle("open", !panel.classList.contains("collapsed"));
-      byId("ep133-kit-toggle").textContent = panel.classList.contains("collapsed") ? "open" : "close";
-    });
     byId("ep133-kit-refresh").addEventListener("click", refresh);
     ui.drop.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -436,6 +425,12 @@
     });
 
     bridge.subscribe(render);
+    window.ep133Features.register({
+      id: "kit",
+      label: "Kit",
+      panel,
+      accent: "var(--ep-display-sample-size, #00a69c)",
+    });
     render();
   }
 

@@ -331,12 +331,7 @@
   function buildPanel() {
     const panel = document.createElement("section");
     panel.id = "ep133-sampler";
-    panel.className = "ep133-utility-drawer collapsed";
     panel.innerHTML = `
-      <header>
-        <span>Sample</span>
-        <button type="button" id="ep133-sampler-toggle">open</button>
-      </header>
       <div id="ep133-sampler-body">
         <div class="ep133-sampler-row">
           <button type="button" data-sampler-source="system" class="active">system</button>
@@ -368,17 +363,19 @@
         </div>
       </div>
     `;
-    document.body.append(panel);
     state.panel = panel;
     state.status = byId("ep133-sampler-status");
     state.canvas = byId("ep133-sampler-wave");
     drawWaveform();
 
-    byId("ep133-sampler-toggle").addEventListener("click", () => {
-      panel.classList.toggle("collapsed");
-      panel.classList.toggle("open", !panel.classList.contains("collapsed"));
-      byId("ep133-sampler-toggle").textContent = panel.classList.contains("collapsed") ? "open" : "close";
-      drawWaveform();
+    window.ep133Features.register({
+      id: "sample",
+      label: "Sample",
+      panel,
+      accent: "var(--ep-btn-shift, #b0babe)",
+    });
+    window.addEventListener("ep133-feature-tab", (event) => {
+      if (event.detail && event.detail.id === "sample") requestAnimationFrame(drawWaveform);
     });
     document.querySelectorAll("[data-sampler-source]").forEach((button) => {
       button.addEventListener("click", () => setActiveSource(button.dataset.samplerSource));

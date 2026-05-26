@@ -369,8 +369,6 @@
   function buildPanel() {
     const panel = document.createElement("section");
     panel.id = "ep133-dsp-panel";
-    panel.className = "ep133-utility-drawer open";
-    panel.innerHTML = "<header><span>DSP</span><button type=\"button\">close</button></header>";
     const body = document.createElement("div");
     body.id = "ep133-dsp-body";
     body.append(
@@ -406,13 +404,13 @@
     state.status.id = "ep133-dsp-status";
     body.append(state.status);
     panel.append(body);
-    panel.querySelector("button").addEventListener("click", () => {
-      panel.classList.toggle("collapsed");
-      panel.classList.toggle("open", !panel.classList.contains("collapsed"));
-      panel.querySelector("button").textContent = panel.classList.contains("collapsed") ? "open" : "close";
-    });
-    document.body.append(panel);
     state.panel = panel;
+    window.ep133Features.register({
+      id: "dsp",
+      label: "DSP",
+      panel,
+      accent: "var(--accent, #f15a22)",
+    });
   }
 
   window.addEventListener("drop", onDrop, true);
