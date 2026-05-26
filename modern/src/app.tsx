@@ -591,9 +591,277 @@ function SampleModal({
   open: boolean;
   pad?: Pad;
   onClose: () => void;
-  onUpload: (files: File[]) => void;
+  onUpload: (files: File[], startPad: number) => void;
 }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const [source, setSource] = useState<"system" | "mic">("system");
+  const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
+  const [markers, setMarkers] = useState<number[]>([]);
+  const [status, setStatus] = useState("Load or record audio");
+  const [recording, setRecording] = useState(false);
+
+  const stopPlayback = useCallback(() => {
+    if (!playbackRef.current) return;
+    try {
+      playbackRef.current.source.stop();
+    } catch {}
+    void playbackRef.current.context.close();
+    playbackRef.current = null;
+  }, []);
+
+  const drawWaveform = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(rect.width * scale));
+    canvas.height = Math.max(1, Math.floor(rect.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.fillStyle = "#071b16";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+
+    if (!audioBuffer) {
+      ctx.fillStyle = "#35d08b";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("load or record audio", 16, rect.height / 2);
+      return;
+    }
+
+    const data = audioBuffer.getChannelData(0);
+    const step = Math.max(1, Math.floor(data.length / rect.width));
+    const mid = rect.height / 2;
+    ctx.strokeStyle = "#35d08b";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < rect.width; x++) {
+      let min = 1;
+      let max = -1;
+      const start = x * step;
+      for (let i = 0; i < step && start + i < data.length; i++) {
+        const value = data[start + i];
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+      ctx.moveTo(x, mid + min * mid * 0.88);
+      ctx.lineTo(x, mid + max * mid * 0.88);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = "#f15a3b";
+    ctx.lineWidth = 2;
+    markers.forEach((marker, index) => {
+      const x = marker * rect.width;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, rect.height);
+      ctx.stroke();
+      ctx.fillStyle = "#f15a3b";
+      ctx.fillRect(x - 8, 6, 16, 16);
+      ctx.fillStyle = "#fff7ef";
+      ctx.font = "10px sans-serif";
+      ctx.fillText(String(index + 1), x - 3, 18);
+    });
+  }, [audioBuffer, markers]);
+
+  useEffect(() => {
+    if (!open) return;
+    drawWaveform();
+    window.addEventListener("resize", drawWaveform);
+    return () => window.removeEventListener("resize", drawWaveform);
+  }, [drawWaveform, open]);
+
+  useEffect(() => () => {
+    stopPlayback();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, [stopPlayback]);
+
+  async function loadBlob(blob: Blob, name = "audio") {
+    stopPlayback();
+    const context = new AudioContext();
+    try {
+      const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+      setAudioBuffer(decoded);
+      setMarkers([]);
+      setStatus(`Loaded ${name} (${decoded.duration.toFixed(2)}s)`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  async function startRecording() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setStatus("Recording is not supported");
+      return;
+    }
+    stopPlayback();
+    chunksRef.current = [];
+    try {
+      const stream = source === "mic"
+        ? await navigator.mediaDevices.getUserMedia({ audio: true })
+        : await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+      const audioTracks = stream.getAudioTracks();
+      if (!audioTracks.length) {
+        stream.getTracks().forEach((track) => track.stop());
+        setStatus("No audio track selected");
+        return;
+      }
+      streamRef.current = new MediaStream(audioTracks);
+      const recorder = new MediaRecorder(streamRef.current);
+      recorderRef.current = recorder;
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      });
+      recorder.addEventListener("stop", async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setRecording(false);
+        if (!chunksRef.current.length) {
+          setStatus("Nothing recorded");
+          return;
+        }
+        await loadBlob(new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }), "recording");
+      });
+      recorder.start();
+      setRecording(true);
+      setStatus(source === "mic" ? "Recording microphone" : "Recording shared audio");
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Recording failed");
+      setRecording(false);
+    }
+  }
+
+  function stopRecording() {
+    recorderRef.current?.state === "recording" ? recorderRef.current.stop() : undefined;
+  }
+
+  function addMarker(event: React.MouseEvent<HTMLCanvasElement>) {
+    if (!audioBuffer || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const marker = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    if (marker <= 0.01 || marker >= 0.99) return;
+    const next = [...new Set([...markers, Number(marker.toFixed(4))])].sort((a, b) => a - b).slice(0, 11);
+    setMarkers(next);
+    setStatus(`${next.length + 1} chop${next.length ? "s" : ""}`);
+  }
+
+  function equalChops(count: number) {
+    if (!audioBuffer) return;
+    setMarkers(Array.from({ length: count - 1 }, (_, index) => (index + 1) / count));
+    setStatus(`${count} equal chops`);
+  }
+
+  function transientChops() {
+    if (!audioBuffer) return;
+    const data = audioBuffer.getChannelData(0);
+    const windowSize = Math.max(128, Math.floor(audioBuffer.sampleRate * 0.012));
+    const energies: number[] = [];
+    for (let pos = 0; pos < data.length; pos += windowSize) {
+      let sum = 0;
+      for (let i = 0; i < windowSize && pos + i < data.length; i++) sum += Math.abs(data[pos + i]);
+      energies.push(sum / windowSize);
+    }
+    const average = energies.reduce((sum, value) => sum + value, 0) / Math.max(1, energies.length);
+    const next: number[] = [];
+    let cooldown = 0;
+    for (let index = 1; index < energies.length - 1; index++) {
+      const rising = energies[index] > energies[index - 1] * 1.8 && energies[index] > average * 1.4;
+      if (cooldown <= 0 && rising) {
+        const marker = (index * windowSize) / data.length;
+        if (marker > 0.02 && marker < 0.98) next.push(Number(marker.toFixed(4)));
+        cooldown = Math.floor(audioBuffer.sampleRate * 0.12 / windowSize);
+      }
+      cooldown--;
+    }
+    setMarkers(next.slice(0, 11));
+    setStatus(`${Math.min(next.length, 11) + 1} transient chops`);
+  }
+
+  function play() {
+    if (!audioBuffer) return;
+    stopPlayback();
+    const context = new AudioContext();
+    const sourceNode = context.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(context.destination);
+    sourceNode.addEventListener("ended", () => {
+      void context.close();
+      playbackRef.current = null;
+    });
+    sourceNode.start();
+    playbackRef.current = { context, source: sourceNode };
+  }
+
+  function encodeWav(channels: Float32Array[], sampleRate: number) {
+    const channelCount = channels.length;
+    const frameCount = channels[0].length;
+    const buffer = new ArrayBuffer(44 + frameCount * channelCount * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    const text = (value: string) => {
+      for (let i = 0; i < value.length; i++) view.setUint8(offset++, value.charCodeAt(i));
+    };
+    text("RIFF");
+    view.setUint32(offset, 36 + frameCount * channelCount * 2, true); offset += 4;
+    text("WAVEfmt ");
+    view.setUint32(offset, 16, true); offset += 4;
+    view.setUint16(offset, 1, true); offset += 2;
+    view.setUint16(offset, channelCount, true); offset += 2;
+    view.setUint32(offset, sampleRate, true); offset += 4;
+    view.setUint32(offset, sampleRate * channelCount * 2, true); offset += 4;
+    view.setUint16(offset, channelCount * 2, true); offset += 2;
+    view.setUint16(offset, 16, true); offset += 2;
+    text("data");
+    view.setUint32(offset, frameCount * channelCount * 2, true); offset += 4;
+    for (let i = 0; i < frameCount; i++) {
+      for (let ch = 0; ch < channelCount; ch++) {
+        const sample = Math.max(-1, Math.min(1, channels[ch][i]));
+        view.setInt16(offset, sample < 0 ? sample * 32768 : sample * 32767, true);
+        offset += 2;
+      }
+    }
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  function renderSlice(startFrame: number, endFrame: number, name: string) {
+    if (!audioBuffer) return null;
+    const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, channel) =>
+      audioBuffer.getChannelData(channel).slice(startFrame, endFrame),
+    );
+    return new File([encodeWav(channels, audioBuffer.sampleRate)], name, { type: "audio/wav" });
+  }
+
+  function renderChops() {
+    if (!audioBuffer) return [];
+    const points = [0, ...markers, 1].sort((a, b) => a - b);
+    return points.flatMap((point, index) => {
+      if (index >= points.length - 1) return [];
+      const start = Math.floor(point * audioBuffer.length);
+      const end = Math.floor(points[index + 1] * audioBuffer.length);
+      if (end - start < audioBuffer.sampleRate * 0.015) return [];
+      const file = renderSlice(start, end, `sample_chop_${String(index + 1).padStart(2, "0")}.wav`);
+      return file ? [file] : [];
+    }).slice(0, 12);
+  }
+
+  function assign() {
+    const files = renderChops();
+    if (!files.length) {
+      setStatus("No audio to assign");
+      return;
+    }
+    onUpload(files, Number(pad?.number || 1));
+  }
+
   if (!open) return null;
 
   return (
@@ -606,45 +874,33 @@ function SampleModal({
         <div className="grid gap-4 p-4 lg:grid-cols-[1fr_260px]">
           <div className="grid gap-4">
             <div className="flex flex-wrap gap-2">
-              <Button><Mic2 className="h-4 w-4" /> Record</Button>
+              <Button variant={source === "system" ? "default" : "outline"} onClick={() => setSource("system")}>System</Button>
+              <Button variant={source === "mic" ? "default" : "outline"} onClick={() => setSource("mic")}>Mic</Button>
+              <Button onClick={recording ? stopRecording : startRecording}><Mic2 className="h-4 w-4" /> {recording ? "Stop" : "Record"}</Button>
               <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
-              <Button variant="outline"><Scissors className="h-4 w-4" /> Detect chops</Button>
-              <Button><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
+              <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect chops</Button>
+              <Button variant="outline" onClick={play}>Play</Button>
+              <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
               <input
                 ref={fileInput}
                 type="file"
                 accept="audio/*"
                 className="hidden"
-                multiple
                 onChange={(event) => {
-                  const files = Array.from(event.target.files || []);
+                  const file = event.target.files?.[0];
                   event.currentTarget.value = "";
-                  if (files.length) onUpload(files);
+                  if (file) void loadBlob(file, file.name);
                 }}
               />
             </div>
-            <div className="relative h-72 overflow-hidden rounded-lg border bg-zinc-950">
-              <div className="absolute inset-x-6 top-1/2 h-px bg-emerald-400/30" />
-              <div className="absolute inset-6 flex items-center gap-1">
-                {Array.from({ length: 120 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="w-1 rounded-full bg-emerald-400"
-                    style={{ height: `${18 + Math.abs(Math.sin(index * 0.37)) * 120}px`, opacity: index % 9 === 0 ? 1 : 0.65 }}
-                  />
-                ))}
-              </div>
-              {[18, 39, 62, 81].map((left, index) => (
-                <div key={left} className="absolute top-4 h-64 w-px bg-primary" style={{ left: `${left}%` }}>
-                  <span className="absolute -left-2 -top-3 rounded bg-primary px-1 text-[10px] text-primary-foreground">{index + 1}</span>
-                </div>
-              ))}
-            </div>
+            <canvas ref={canvasRef} onClick={addMarker} className="h-72 w-full rounded-lg border bg-zinc-950" />
+            <div className="text-sm text-muted-foreground">{status}</div>
           </div>
           <div className="grid content-start gap-3">
-            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 4 equal chops</Button>
-            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 8 equal chops</Button>
-            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 12 equal chops</Button>
+            <Button variant="outline" className="justify-start" onClick={() => equalChops(4)}><Scissors className="h-4 w-4" /> 4 equal chops</Button>
+            <Button variant="outline" className="justify-start" onClick={() => equalChops(8)}><Scissors className="h-4 w-4" /> 8 equal chops</Button>
+            <Button variant="outline" className="justify-start" onClick={() => equalChops(12)}><Scissors className="h-4 w-4" /> 12 equal chops</Button>
+            <Button variant="outline" className="justify-start" onClick={() => setMarkers([])}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
               Chops are staged for the selected project/group target. The upload action assigns the rendered files starting at pad {Number(pad?.number || 1)}.
             </div>
@@ -962,8 +1218,8 @@ export function App() {
         open={samplerOpen}
         pad={selected}
         onClose={() => setSamplerOpen(false)}
-        onUpload={(files) => {
-          if (selected) void engine.uploadToPads(files, [selected]);
+        onUpload={(files, startPad) => {
+          void engine.uploadToPads(files, engine.pads.slice(startPad - 1, startPad - 1 + files.length));
           setSamplerOpen(false);
         }}
       />
