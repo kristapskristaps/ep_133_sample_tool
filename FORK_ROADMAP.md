@@ -11,7 +11,7 @@ The fork now includes a modern React/Vite/Tailwind workspace in `modern/`.
 The modern shell is the new primary UI direction:
 
 - A utilitarian app frame with persistent left navigation.
-- A single pad-centric workspace for project/group selection, pad assignment, sample settings, sampling/chopping, and kit import/export.
+- Two main workspaces: a pad-centric Project view and a device-wide Library view.
 - Integrated dark mode with persisted theme preference.
 - Shared visual tokens for buttons, panels, pads, tabs, and status surfaces.
 - A production build path through `npm run modern:build`.
@@ -27,7 +27,9 @@ Current workspace flow:
 - Open a sampling/chopping modal from the selected pad.
 - Apply transfer DSP from the same workspace through `Sample Settings`.
 - Import, export, and inspect the active kit from the main view.
-- Manage the device sample library and memory from the same workspace.
+- Switch to the Library view to manage device memory and samples by 100-slot ranges.
+- Search all loaded samples while preserving the original 0-99, 100-199, 200-299 style grouping.
+- See whether a sample is used by projects such as project 5, 7, or 9 when project pad metadata is available from the connected device.
 
 ### Legacy feature sidebar
 
@@ -53,7 +55,7 @@ Current transfer-time processing:
 - Add fade-in and fade-out ramps.
 - Mix stereo/multichannel files down to mono.
 - Resample output to a target sample rate, defaulting to the EP device rate.
-- Apply simple low-cut and high-cut filters.
+- Apply simple low-cut and high-cut filters with editable cutoff frequencies.
 - Apply a gain trim after normalization.
 - Generate optional reversed copies next to the original file.
 - Generate optional ping-pong copies.
@@ -83,7 +85,9 @@ Current kit workflow:
 - Drop one sample on a pad to upload and assign it.
 - Drop a folder or batch of up to 12 audio files on the kit drop zone to auto-sort and assign pads.
 - Play, download as WAV, or clear an assigned pad.
-- Browse loaded samples, see memory usage, upload library samples, preview, download WAVs, and delete samples.
+- Browse loaded samples in the Library view, see memory usage, search across all sample banks, preview, download WAVs, and delete samples.
+- Keep the original 100-sample bank separation while still filtering search results across every bank.
+- Show project usage labels for sounds referenced by project pad assignments.
 - Export the active group as a kit archive ZIP containing assigned pad WAV files and a `kit.json` manifest.
 - Import a kit archive ZIP exported by this fork and restore its samples to the matching active-group pads.
 

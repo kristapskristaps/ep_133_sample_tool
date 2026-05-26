@@ -39,6 +39,7 @@ type Sound = {
   name: string;
   path?: string;
   size?: string;
+  usageProjects?: string[];
   meta?: {
     name?: string;
     channels?: number;
@@ -63,6 +64,7 @@ type EngineBridge = {
       playback?: (path: string, preview?: boolean) => Promise<void>;
       deleteSound?: (path: string) => Promise<void>;
       downloadSoundAsWav?: (path: string) => Promise<Blob>;
+      getProjectPadMeta?: (project: string) => AsyncIterable<{ sym?: number } | null | undefined>;
     };
     activeProject?: { node?: { name?: string } };
     activeGroup?: { node?: { name?: string } };
@@ -128,6 +130,8 @@ type SampleSettings = {
   pingPong: boolean;
   lowCut: boolean;
   highCut: boolean;
+  lowCutHz: string;
+  highCutHz: string;
   targetDb: string;
   sourceBpm: string;
   targetBpm: string;
@@ -150,6 +154,8 @@ const defaultSettings: SampleSettings = {
   pingPong: false,
   lowCut: false,
   highCut: false,
+  lowCutHz: "35",
+  highCutHz: "16000",
   targetDb: "-0.3",
   sourceBpm: "",
   targetBpm: "",
@@ -164,8 +170,8 @@ function syncOfflineDspSettings(settings: SampleSettings) {
     normalizeTargetDb: Number(settings.targetDb) || -0.3,
     trimSilence: settings.trim,
     mono: settings.mono,
-    lowCutHz: settings.lowCut ? 35 : "",
-    highCutHz: settings.highCut ? 16000 : "",
+    lowCutHz: settings.lowCut ? Number(settings.lowCutHz) || 35 : "",
+    highCutHz: settings.highCut ? Number(settings.highCutHz) || 16000 : "",
     sourceBpm: settings.sourceBpm,
     targetBpm: settings.targetBpm,
   };
@@ -294,6 +300,7 @@ function useTheme() {
 function useDeviceEngine() {
   const [state, setState] = useState<EngineState>(() => snapshotEngine());
   const [midiStatus, setMidiStatus] = useState("");
+  const [usageMap, setUsageMap] = useState<Record<number, string[]>>({});
   const autoConnectAttempted = useRef(false);
 
   const getBridge = useCallback(() => window.ep133KitBridge as EngineBridge | undefined, []);
@@ -347,8 +354,40 @@ function useDeviceEngine() {
     void requestMidi();
   }, [requestMidi, state.connected, state.ready]);
 
+  useEffect(() => {
+    if (!state.connected || !state.sounds.length) {
+      setUsageMap({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const service = getBridge()?.device?.deviceService;
+      if (!service?.getProjectPadMeta) return;
+      const next: Record<number, Set<string>> = {};
+      for (const project of projects) {
+        try {
+          for await (const meta of service.getProjectPadMeta(project)) {
+            const soundId = meta?.sym;
+            if (!soundId || soundId <= 0) continue;
+            if (!next[soundId]) next[soundId] = new Set();
+            next[soundId].add(project);
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      if (!cancelled) {
+        setUsageMap(Object.fromEntries(Object.entries(next).map(([id, used]) => [id, [...used].sort()])));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [getBridge, state.connected, state.sounds.length]);
+
   return {
     ...state,
+    sounds: state.sounds.map((sound) => ({ ...sound, usageProjects: usageMap[sound.id] || [] })),
     status: state.connected ? state.status : midiStatus || state.status,
     connect: requestMidi,
     refresh: () => run((bridge) => bridge.device?.refresh?.()),
@@ -510,6 +549,8 @@ function SampleSettingsPanel({
         <SettingRow label="Mono mix" detail="Collapse stereo files for tight kits" checked={settings.mono} onCheckedChange={(checked) => update("mono", checked)} />
         <SettingRow label="Reverse copy" detail="Create a reversed variant next to source" checked={settings.reverse} onCheckedChange={(checked) => update("reverse", checked)} />
         <SettingRow label="Ping-pong copy" detail="Render forward and reverse playback" checked={settings.pingPong} onCheckedChange={(checked) => update("pingPong", checked)} />
+        <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={(checked) => update("lowCut", checked)} />
+        <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={(checked) => update("highCut", checked)} />
         <div className="grid grid-cols-2 gap-2">
           <label className="grid gap-1 text-xs text-muted-foreground">
             Target dBFS
@@ -523,10 +564,14 @@ function SampleSettingsPanel({
             Target BPM
             <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetBpm} onChange={(event) => update("targetBpm", event.target.value)} />
           </label>
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant={settings.lowCut ? "default" : "outline"} onClick={() => update("lowCut", !settings.lowCut)}>Low cut</Button>
-            <Button variant={settings.highCut ? "default" : "outline"} onClick={() => update("highCut", !settings.highCut)}>High cut</Button>
-          </div>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Low cut Hz
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lowCutHz} onChange={(event) => update("lowCutHz", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            High cut Hz
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.highCutHz} onChange={(event) => update("highCutHz", event.target.value)} />
+          </label>
         </div>
         <Button variant="outline" className="justify-start" onClick={() => setSettings(defaultSettings)}>
           <RotateCcw className="h-4 w-4" /> Reset settings
@@ -920,16 +965,24 @@ function SampleManager({
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const sounds = engine.sounds.filter((sound) => {
-    const text = `${sound.id} ${sound.name} ${sound.path || ""}`.toLowerCase();
+    const text = `${sound.id} ${sound.name} ${sound.path || ""} ${(sound.usageProjects || []).join(" ")}`.toLowerCase();
     return text.includes(query.toLowerCase());
   });
   const selected = sounds.find((sound) => sound.id === selectedId) || sounds[0];
+  const groupedSounds = sounds.reduce<Record<string, Sound[]>>((groupsByHundred, sound) => {
+    const start = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
+    const range = `${start}-${start + 99}`;
+    if (!groupsByHundred[range]) groupsByHundred[range] = [];
+    groupsByHundred[range].push(sound);
+    return groupsByHundred;
+  }, {});
+  const soundGroups = Object.entries(groupedSounds).sort(([a], [b]) => Number(a.split("-")[0]) - Number(b.split("-")[0]));
 
   return (
-    <Card>
+    <Card className="min-h-[calc(100vh-260px)]">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionTitle icon={Archive} title="Sample Library" description="Manage device memory and all loaded samples." />
+          <SectionTitle icon={Archive} title="Sample Library" description="Browse EP memory by 100-slot banks, search, preview, export, or clear samples." />
           <div className="flex gap-2">
             <input
               ref={uploadInput}
@@ -950,40 +1003,73 @@ function SampleManager({
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <div className="grid gap-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{engine.memory}</span>
-            <span>{engine.memoryUsedPercent}%</span>
+        <div className="grid gap-3 rounded-lg border bg-muted/35 p-3 md:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{engine.memory}</span>
+              <span>{engine.memoryUsedPercent}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary" style={{ width: `${Math.min(100, engine.memoryUsedPercent)}%` }} />
+            </div>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full bg-primary" style={{ width: `${Math.min(100, engine.memoryUsedPercent)}%` }} />
-          </div>
+          <label className="relative grid gap-1 text-xs text-muted-foreground">
+            Search samples
+            <Search className="pointer-events-none absolute bottom-2 left-2.5 h-4 w-4 text-muted-foreground" />
+            <input className="h-9 rounded-md border bg-background pl-8 pr-2 text-sm text-foreground" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
         </div>
-        <label className="grid gap-1 text-xs text-muted-foreground">
-          Search samples
-          <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
-          {sounds.length ? sounds.slice(0, 80).map((sound) => (
-            <button
-              key={sound.id}
-              onClick={() => setSelectedId(sound.id)}
-              className={cn(
-                "grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-background p-2 text-left text-sm transition hover:border-primary",
-                selected?.id === sound.id && "border-primary bg-primary/10",
-              )}
-            >
-              <span className="font-mono text-xs text-muted-foreground">{String(sound.id).padStart(3, "0")}</span>
-              <span className="truncate font-medium">{sound.name}</span>
-              <span className="text-xs text-muted-foreground">{sound.size}</span>
-            </button>
+        <div className="grid gap-4 overflow-auto pr-1 xl:max-h-[calc(100vh-430px)]">
+          {soundGroups.length ? soundGroups.map(([range, items]) => (
+            <section key={range} className="grid gap-2">
+              <div className="sticky top-0 z-10 flex items-center justify-between rounded-md border bg-card/95 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
+                <span>Samples {range}</span>
+                <span>{items.length} shown</span>
+              </div>
+              <div className="grid gap-2">
+                {items.map((sound) => {
+                  const usage = sound.usageProjects || [];
+                  return (
+                    <button
+                      key={sound.id}
+                      onClick={() => setSelectedId(sound.id)}
+                      className={cn(
+                        "grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-background p-3 text-left text-sm transition hover:border-primary hover:bg-primary/5",
+                        selected?.id === sound.id && "border-primary bg-primary/10",
+                      )}
+                    >
+                      <span className="rounded-md bg-muted px-2 py-1 text-center font-mono text-xs text-muted-foreground">{String(sound.id).padStart(3, "0")}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{sound.name}</span>
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {usage.length ? usage.map((project) => (
+                            <span key={project} className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                              Project {Number(project)}
+                            </span>
+                          )) : (
+                            <span className="rounded-sm border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">unused</span>
+                          )}
+                        </span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">{sound.size}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           )) : (
-            <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-              {engine.connected ? "No samples loaded." : "Connect a device to load samples."}
+            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+              {engine.connected ? "No samples match the current search." : "Connect a device to load samples."}
             </div>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/35 p-3">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{selected ? `${String(selected.id).padStart(3, "0")} ${selected.name}` : "No sample selected"}</div>
+            <div className="text-xs text-muted-foreground">
+              {selected?.usageProjects?.length ? `Used in project ${selected.usageProjects.map((project) => Number(project)).join(", ")}` : "No project usage detected"}
+            </div>
+          </div>
           <Button size="sm" variant="outline" onClick={() => engine.playSound(selected)} disabled={!selected}>Play</Button>
           <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>WAV</Button>
           <Button size="sm" variant="outline" onClick={() => engine.deleteSound(selected)} disabled={!selected}>Delete</Button>
@@ -1139,15 +1225,19 @@ function Workspace({
         </Card>
 
         <SampleSettingsPanel settings={settings} setSettings={setSettings} />
-        <SampleManager engine={engine} />
       </div>
     </div>
   );
 }
 
+function LibraryView({ engine }: { engine: ReturnType<typeof useDeviceEngine> }) {
+  return <SampleManager engine={engine} />;
+}
+
 export function App() {
   const { dark, setDark } = useTheme();
   const engine = useDeviceEngine();
+  const [view, setView] = useState<"project" | "library">("project");
   const [selectedPad, setSelectedPad] = useState("01");
   const [settings, setSettings] = useState<SampleSettings>(defaultSettings);
   const [samplerOpen, setSamplerOpen] = useState(false);
@@ -1166,22 +1256,36 @@ export function App() {
             <Music2 className="h-5 w-5" />
           </div>
           <div>
-            <div className="font-semibold">EP Tools</div>
-            <div className="text-xs text-muted-foreground">Project kit workspace</div>
+            <div className="font-semibold">EP-133</div>
+            <div className="text-xs text-muted-foreground">Sampler workspace</div>
           </div>
         </div>
         <nav className="grid gap-1 p-3">
-          <button className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm text-foreground">
+          <button
+            onClick={() => setView("project")}
+            className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground", view === "project" && "bg-muted text-foreground")}
+          >
             <LayoutDashboard className="h-4 w-4" />
-            Workspace
+            Project
+          </button>
+          <button
+            onClick={() => setView("library")}
+            className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground", view === "library" && "bg-muted text-foreground")}
+          >
+            <Archive className="h-4 w-4" />
+            Library
           </button>
         </nav>
       </aside>
       <main className="lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-6 backdrop-blur">
-          <div>
-            <h1 className="text-lg font-semibold">EP-133 Sample Workspace</h1>
-            <p className="text-sm text-muted-foreground">Select a project, group, and pad. Then sample, process, upload, import, or export.</p>
+        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold">{view === "project" ? "Project View" : "Library View"}</h1>
+            <p className="hidden text-sm text-muted-foreground sm:block">
+              {view === "project"
+                ? "Select a project, group, and pad. Then sample, process, upload, import, or export."
+                : "Manage device memory, browse sample banks, search, preview, export, and clear sounds."}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setDark(!dark)}>
@@ -1194,6 +1298,14 @@ export function App() {
           </div>
         </header>
         <div className="grid gap-6 p-6">
+          <div className="grid grid-cols-2 gap-2 lg:hidden">
+            <Button variant={view === "project" ? "default" : "outline"} onClick={() => setView("project")}>
+              <LayoutDashboard className="h-4 w-4" /> Project
+            </Button>
+            <Button variant={view === "library" ? "default" : "outline"} onClick={() => setView("library")}>
+              <Archive className="h-4 w-4" /> Library
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-4">
             <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
             <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
@@ -1204,14 +1316,18 @@ export function App() {
             <span className="text-muted-foreground">Status</span>
             <span className="font-medium">{engine.status}</span>
           </div>
-          <Workspace
-            engine={engine}
-            selectedPad={selectedPad}
-            setSelectedPad={setSelectedPad}
-            settings={settings}
-            setSettings={setSettings}
-            onOpenSampler={() => setSamplerOpen(true)}
-          />
+          {view === "project" ? (
+            <Workspace
+              engine={engine}
+              selectedPad={selectedPad}
+              setSelectedPad={setSelectedPad}
+              settings={settings}
+              setSettings={setSettings}
+              onOpenSampler={() => setSamplerOpen(true)}
+            />
+          ) : (
+            <LibraryView engine={engine} />
+          )}
         </div>
       </main>
       <SampleModal
