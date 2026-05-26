@@ -206,6 +206,7 @@
 
   async function onDrop(event) {
     if (event[SYNTHETIC_DROP]) return;
+    if (event.target && event.target.closest && event.target.closest("#ep133-kit-inspector")) return;
     const files = Array.from(event.dataTransfer ? event.dataTransfer.files : []);
     if (!shouldProcess(files)) return;
 
@@ -273,4 +274,8 @@
 
   window.addEventListener("drop", onDrop, true);
   window.addEventListener("DOMContentLoaded", buildPanel);
+  window.ep133OfflineDsp = {
+    settings: state.settings,
+    processFiles,
+  };
 })();

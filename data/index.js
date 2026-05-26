@@ -52930,6 +52930,20 @@ const STYLE = style.join(`
       );
     return (
       reactExports.useEffect(() => {
+        var xt;
+        (xt = window.ep133KitBridge) == null ||
+          xt.setUploaderState({
+            enqueueFiles: it,
+            isUploading: ot,
+            fileCollection: nt,
+            findNextFreeSoundSlot: j,
+            sounds: $,
+            assignToDropzone: g,
+            activeGroup: b,
+            pads: c,
+          });
+      }, [it, ot, nt, j, $, g, b, c]),
+      reactExports.useEffect(() => {
         if (!(_t === -1 || ot || !Et)) {
           if (["A", "B", "C", "D"].includes(Et)) {
             const xt = nt
@@ -61970,6 +61984,20 @@ const DeleteModal = ({ handleErase: a }) => {
           () => ($ === null ? null : d.find((Et) => Et.path === $)) || null,
           [$, d]
         );
+      reactExports.useEffect(() => {
+        var Et;
+        (Et = window.ep133KitBridge) == null ||
+          Et.setDeviceState({
+            deviceService: a,
+            activeProject: s,
+            activeGroup: _,
+            activePads: d,
+            currentPad: at,
+            refresh: nt,
+            setProject: rt,
+            setGroup: tt,
+          });
+      }, [a, s, _, d, at, nt, rt, tt]);
       return jsxRuntimeExports$1.jsx(SoundsProvider, {
         children: jsxRuntimeExports$1.jsx(TabProvider, {
           deviceService: a,

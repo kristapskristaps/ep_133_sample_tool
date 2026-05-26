@@ -1,0 +1,141 @@
+#ep133-kit-inspector {
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  z-index: 10000;
+  width: 336px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: #101214;
+  color: #f4f4f4;
+  border: 1px solid #00a69c;
+  box-shadow: 4px 4px 0 #000;
+  font: 12px/1.35 Arial, sans-serif;
+}
+
+#ep133-kit-inspector * {
+  box-sizing: border-box;
+}
+
+#ep133-kit-inspector header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #00a69c;
+  color: #000;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+#ep133-kit-inspector button {
+  border: 1px solid #000;
+  background: #dbdddb;
+  color: #000;
+  cursor: pointer;
+  font: inherit;
+  padding: 3px 7px;
+}
+
+#ep133-kit-inspector button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+#ep133-kit-inspector.collapsed #ep133-kit-body {
+  display: none;
+}
+
+#ep133-kit-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ep133-kit-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ep133-kit-label {
+  color: #9aa0a9;
+  min-width: 48px;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.ep133-kit-row button.active {
+  background: #ef4e34;
+}
+
+#ep133-kit-pads {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ep133-kit-pad {
+  min-height: 70px;
+  border: 1px solid #343a40;
+  background: #181b1f;
+  color: #f4f4f4;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.ep133-kit-pad.assigned {
+  border-color: #00a69c;
+}
+
+.ep133-kit-pad.drop-target {
+  outline: 2px solid #ef4e34;
+}
+
+.ep133-kit-pad-num {
+  color: #ef4e34;
+  font-weight: 700;
+}
+
+.ep133-kit-pad-name {
+  min-height: 28px;
+  word-break: break-word;
+}
+
+.ep133-kit-pad-meta {
+  color: #9aa0a9;
+  font-size: 10px;
+}
+
+.ep133-kit-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.ep133-kit-actions button {
+  padding: 1px 5px;
+  font-size: 11px;
+}
+
+#ep133-kit-drop {
+  border: 1px dashed #69727c;
+  padding: 10px;
+  text-align: center;
+  color: #cfd3d8;
+  background: #15181b;
+}
+
+#ep133-kit-drop.drop-target {
+  border-color: #ef4e34;
+  color: #fff;
+}
+
+#ep133-kit-status {
+  min-height: 16px;
+  color: #00d0c7;
+}

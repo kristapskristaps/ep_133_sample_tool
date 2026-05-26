@@ -19,6 +19,22 @@ Current transfer-time processing:
 
 The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. This keeps the minified upstream bundle untouched.
 
+### Kit inspector and quick kit upload
+
+The fork adds a `Kit Inspector` panel loaded from `data/kit-inspector.js` and `data/kit-inspector.css`.
+
+Current kit workflow:
+
+- See the active project, active group, and all 12 pads in that group.
+- See which sound id/path is assigned to each pad.
+- Resolve assigned sound names from the device when available.
+- Switch projects 01-09 and groups A-D.
+- Drop one sample on a pad to upload and assign it.
+- Drop a folder or batch of up to 12 audio files on the kit drop zone to auto-sort and assign pads.
+- Play, download as WAV, or clear an assigned pad.
+
+The inspector uses a small bridge inserted into the bundled app so it can call the app's existing uploader and device service instead of reimplementing Sysex operations.
+
 ## Next feature slices
 
 ### High-quality pitch and time processing
@@ -32,10 +48,9 @@ The current BPM conforming is Web Audio resampling, so it changes pitch. For pro
 
 ### Kit builder
 
-- Detect 12-sample kit folders from drag/drop.
-- Sort samples by filename category and common kit ordering.
-- Add a pad assignment preview before upload.
-- Reuse the existing upload completion hook to assign uploaded sounds to pads 1-12.
+- Add an editable pad assignment preview before upload.
+- Add per-pad choke and MIDI-related metadata controls once the relevant device metadata is confirmed.
+- Add save/load kit templates.
 
 ### Sample chopping
 
