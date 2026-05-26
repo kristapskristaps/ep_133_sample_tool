@@ -59,6 +59,10 @@ type EngineBridge = {
       meta?: { sym?: number; name?: string };
     }>;
     currentPad?: unknown;
+    isScanning?: boolean;
+    deviceError?: string;
+    deviceCount?: number;
+    engineLocked?: boolean;
     refresh?: () => Promise<void>;
     setProject?: (project: string) => Promise<void>;
     setGroup?: (group: string) => Promise<void>;
@@ -170,8 +174,29 @@ function snapshotEngine(bridge?: EngineBridge): EngineState {
     activeProject,
     activeGroup,
     uploading: Boolean(bridge?.uploader?.isUploading),
-    status: !bridge ? "Engine loading" : bridge.device?.deviceService ? "Connected" : "No device found",
+    status: !bridge
+      ? "Engine loading"
+      : bridge.device?.deviceService
+        ? "Connected"
+        : bridge.device?.engineLocked
+          ? "Device engine is locked by another tab"
+          : bridge.device?.deviceError
+            ? bridge.device.deviceError
+            : bridge.device?.isScanning
+              ? "Scanning for EP device"
+              : "No device found",
   };
+}
+
+function midiPortSummary(access: MIDIAccess) {
+  const inputs = Array.from(access.inputs.values());
+  const outputs = Array.from(access.outputs.values());
+  const names = [...inputs, ...outputs].map((port) => port.name).filter(Boolean);
+  const epNames = names.filter((name) => /EP|KO|K\.O|teenage|engineering/i.test(name || ""));
+  const count = `${inputs.length} input${inputs.length === 1 ? "" : "s"}, ${outputs.length} output${outputs.length === 1 ? "" : "s"}`;
+  if (epNames.length) return `Scanning ${count}: ${epNames.slice(0, 2).join(", ")}`;
+  if (names.length) return `Scanning ${count}; no EP port matched`;
+  return "No MIDI ports visible";
 }
 
 function useTheme() {
@@ -234,8 +259,8 @@ function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
         }
         setMidiStatus("Requesting MIDI/Sysex access");
         try {
-          await frameWindow.navigator.requestMIDIAccess({ sysex: true });
-          setMidiStatus("Scanning for EP device");
+          const access = await frameWindow.navigator.requestMIDIAccess({ sysex: true });
+          setMidiStatus(midiPortSummary(access));
           await bridge.device?.refresh?.();
         } catch {
           setMidiStatus("MIDI/Sysex permission was denied");
@@ -269,7 +294,7 @@ function DeviceEngineHost({ frameRef }: { frameRef: RefObject<HTMLIFrameElement 
       ref={frameRef}
       title="EP-133 internal device engine"
       src={engineUrl()}
-      allow="midi; midi-sysex"
+      allow="midi *; midi-sysex *"
       aria-hidden="true"
       tabIndex={-1}
       className="pointer-events-none fixed -bottom-[900px] -right-[1300px] h-[800px] w-[1200px] opacity-0"

@@ -74608,6 +74608,18 @@ function App({ debug: a }) {
     [_e, it] = reactExports.useState(!1),
     { sku: ot, setSku: st } = useSku();
   reactExports.useEffect(() => {
+    var rt;
+    (rt = window.ep133KitBridge) == null ||
+      rt.setDeviceState({
+        isScanning: _,
+        deviceError: c ? c.message || String(c) : "",
+        deviceCount: o.length,
+        engineLocked: _e,
+      });
+  }, [_, c, o.length, _e]);
+  reactExports.useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("ep-modern-engine"))
+      return;
     (async () =>
       await navigator.locks.request(
         "ep-sample-util",
