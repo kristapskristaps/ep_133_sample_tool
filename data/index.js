@@ -74623,7 +74623,10 @@ function App({ debug: a }) {
       });
   }, [_, c, o.length, _e]);
   reactExports.useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("ep-modern-engine"))
+    if (
+      window.__EP133_ENGINE_ONLY ||
+      new URLSearchParams(window.location.search).has("ep-modern-engine")
+    )
       return;
     (async () =>
       await navigator.locks.request(
@@ -74762,7 +74765,9 @@ init({
   },
   normalizeDepth: 10,
 });
-client.createRoot(document.getElementById("root")).render(
+client.createRoot(
+  document.getElementById(window.__EP133_ENGINE_ROOT_ID || "root")
+).render(
   jsxRuntimeExports$1.jsx(ErrorProvider, {
     children: jsxRuntimeExports$1.jsx(ResampleProvider, {
       children: jsxRuntimeExports$1.jsx(SkuProvider, {

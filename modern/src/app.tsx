@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   AudioLines,
@@ -111,8 +111,8 @@ const nav = [
   [Archive, "Archive", "archive"],
 ] as const;
 
-function engineUrl() {
-  return import.meta.env.DEV ? "/legacy/engine.html?ep-modern-engine=1" : "../../data/engine.html?ep-modern-engine=1";
+function engineAsset(path: string) {
+  return import.meta.env.DEV ? `/legacy/${path}` : `../../data/${path}`;
 }
 
 function formatBytes(value?: number) {
@@ -211,17 +211,14 @@ function useTheme() {
   return { dark, setDark };
 }
 
-function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
+function useDeviceEngine() {
   const [state, setState] = useState<EngineState>(() => snapshotEngine());
   const [midiStatus, setMidiStatus] = useState("");
+  const autoConnectAttempted = useRef(false);
 
   const getBridge = useCallback(() => {
-    try {
-      return frameRef.current?.contentWindow?.ep133KitBridge as EngineBridge | undefined;
-    } catch {
-      return undefined;
-    }
-  }, [frameRef]);
+    return window.ep133KitBridge as EngineBridge | undefined;
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -248,19 +245,36 @@ function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
     [getBridge],
   );
 
+  useEffect(() => {
+    if (autoConnectAttempted.current || !state.ready || state.connected) return;
+    autoConnectAttempted.current = true;
+    void run(async (bridge) => {
+      if (!navigator.requestMIDIAccess) {
+        setMidiStatus("Web MIDI is not available in this runtime");
+        return;
+      }
+      try {
+        const access = await navigator.requestMIDIAccess({ sysex: true });
+        setMidiStatus(midiPortSummary(access));
+        bridge.device?.requestMidi?.();
+      } catch {
+        setMidiStatus("Click Connect to allow MIDI/Sysex");
+      }
+    });
+  }, [run, state.connected, state.ready]);
+
   return {
     ...state,
     status: state.connected ? state.status : midiStatus || state.status,
     connect: () =>
       run(async (bridge) => {
-        const frameWindow = frameRef.current?.contentWindow;
-        if (!frameWindow?.navigator.requestMIDIAccess) {
+        if (!navigator.requestMIDIAccess) {
           setMidiStatus("Web MIDI is not available in this runtime");
           return;
         }
         setMidiStatus("Requesting MIDI/Sysex access");
         try {
-          const access = await frameWindow.navigator.requestMIDIAccess({ sysex: true });
+          const access = await navigator.requestMIDIAccess({ sysex: true });
           setMidiStatus(midiPortSummary(access));
           bridge.device?.requestMidi?.();
           window.setTimeout(() => bridge.device?.requestMidi?.(), 1200);
@@ -291,18 +305,42 @@ function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
   };
 }
 
-function DeviceEngineHost({ frameRef }: { frameRef: RefObject<HTMLIFrameElement | null> }) {
-  return (
-    <iframe
-      ref={frameRef}
-      title="EP-133 internal device engine"
-      src={engineUrl()}
-      allow="midi *; midi-sysex *"
-      aria-hidden="true"
-      tabIndex={-1}
-      className="pointer-events-none fixed -bottom-[900px] -right-[1300px] h-[800px] w-[1200px] opacity-0"
-    />
-  );
+function DeviceEngineHost() {
+  useEffect(() => {
+    if (window.__EP133_ENGINE_LOADED) return;
+    window.__EP133_ENGINE_LOADED = true;
+    window.__EP133_ENGINE_ONLY = true;
+    window.__EP133_ENGINE_ROOT_ID = "ep133-engine-root";
+
+    const root = document.createElement("div");
+    root.id = "ep133-engine-root";
+    root.setAttribute("aria-hidden", "true");
+    root.className = "pointer-events-none fixed -bottom-[900px] -right-[1300px] h-[800px] w-[1200px] overflow-hidden opacity-0";
+    document.body.append(root);
+
+    const loadScript = (src: string, type?: "module") =>
+      new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = engineAsset(src);
+        if (type) script.type = type;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`failed to load ${src}`));
+        document.body.append(script);
+      });
+
+    void (async () => {
+      await loadScript("custom.js");
+      await loadScript("feature-sidebar.js");
+      await loadScript("dsp.js");
+      await loadScript("kit-inspector.js");
+      await loadScript("sampler.js");
+      await loadScript("index.js", "module");
+    })().catch((error) => {
+      console.error(error);
+    });
+  }, []);
+
+  return null;
 }
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Gauge }) {
@@ -631,15 +669,14 @@ function ArchivePanel({ engine }: { engine: ReturnType<typeof useDeviceEngine> }
 
 export function App() {
   const { dark, setDark } = useTheme();
-  const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const engine = useDeviceEngine(frameRef);
+  const engine = useDeviceEngine();
   const [tab, setTab] = useState("kit");
   const [selectedPad, setSelectedPad] = useState("01");
   const usedPads = useMemo(() => engine.pads.filter((pad) => pad.name).length, [engine.pads]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <DeviceEngineHost frameRef={frameRef} />
+      <DeviceEngineHost />
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-sidebar lg:block">
         <div className="flex h-16 items-center gap-2 border-b px-5">
           <div className="rounded-md bg-primary p-2 text-primary-foreground">

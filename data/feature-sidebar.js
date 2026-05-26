@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const engineOnly = new URLSearchParams(window.location.search).has("ep-modern-engine");
+  const engineOnly = window.__EP133_ENGINE_ONLY || new URLSearchParams(window.location.search).has("ep-modern-engine");
   if (engineOnly) {
     window.ep133Features = {
       register() {},
