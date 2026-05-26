@@ -49,6 +49,24 @@ Current kit workflow:
 
 The inspector uses a small bridge inserted into the bundled app so it can call the app's existing uploader and device service instead of reimplementing Sysex operations.
 
+### Sampler mode
+
+The fork adds a `Sample` drawer loaded from `data/sampler.js` and `data/sampler.css`.
+
+Current sampler workflow:
+
+- Capture shared system/tab audio when the browser/Electron runtime exposes it through screen sharing.
+- Capture microphone audio as a fallback.
+- Load an existing local audio file for slicing.
+- Draw a waveform preview in the browser.
+- Add manual chop markers by clicking the waveform.
+- Generate equal 4, 8, or 12-way chops.
+- Suggest transient chops with simple amplitude-onset detection.
+- Render chops as WAV files.
+- Assign rendered chops directly to active pads starting from a chosen pad.
+
+System audio capture depends on the Chromium/WebRTC picker and host OS permissions. On some systems the user must choose a tab/window/screen with audio sharing enabled; on others only microphone capture may be available.
+
 ## Next feature slices
 
 ### High-quality pitch and time processing
@@ -68,10 +86,10 @@ The current BPM conforming is Web Audio resampling, so it changes pitch. For pro
 
 ### Sample chopping
 
-- Add a waveform modal for long loops.
-- Use transient detection for marker suggestions.
-- Export slices as generated WAV `File` objects.
-- Drop the slice batch into the existing pad assignment path.
+- Improve marker editing with draggable markers and per-slice audition.
+- Add zoom and trim handles.
+- Add beat-grid chopping from BPM.
+- Add per-slice naming before upload.
 
 ### Snapshot timeline
 

@@ -385,6 +385,10 @@
     renderPads();
   }
 
+  bridge.uploadFilesToPads = uploadFilesToPads;
+  bridge.sortedPads = sortedPads;
+  bridge.padOrder = PAD_ORDER;
+
   function buildPanel() {
     const panel = document.createElement("section");
     panel.id = "ep133-kit-inspector";
