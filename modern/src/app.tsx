@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   AudioLines,
   AudioWaveform,
-  Cable,
   CheckCircle2,
   CircleDot,
   Download,
   FolderInput,
   Gauge,
-  HardDrive,
   LayoutDashboard,
   Mic2,
   Moon,
@@ -35,22 +33,68 @@ type Pad = {
   name: string;
   type: string;
   size?: string;
+  assignedPath?: string;
+  raw?: unknown;
 };
 
-const initialPads: Pad[] = [
-  { number: "01", name: "ARK KICK", type: "Kick", size: "11.6 KB" },
-  { number: "02", name: "BAM KICK", type: "Kick", size: "13.2 KB" },
-  { number: "03", name: "", type: "Unassigned" },
-  { number: "04", name: "CLOSE HAT", type: "Cymbal", size: "7.8 KB" },
-  { number: "05", name: "RIM CLICK", type: "Perc", size: "5.2 KB" },
-  { number: "06", name: "", type: "Unassigned" },
-  { number: "07", name: "VOX CHOP", type: "Slice", size: "19.8 KB" },
-  { number: "08", name: "BASS HIT", type: "Bass", size: "22.4 KB" },
-  { number: "09", name: "", type: "Unassigned" },
-  { number: "10", name: "553_VOX", type: "Slice", size: "31.4 KB" },
-  { number: "11", name: "HYPER CHAMPION", type: "Loop", size: "48.2 KB" },
-  { number: "12", name: "", type: "Unassigned" },
-];
+type EngineBridge = {
+  device?: {
+    deviceService?: {
+      device?: {
+        name?: string;
+        serial?: string;
+        metadata?: {
+          os_version?: string;
+          used_storage_bytes?: number;
+          free_storage_bytes?: number;
+        };
+      };
+    };
+    activeProject?: { node?: { name?: string } };
+    activeGroup?: { node?: { name?: string } };
+    activePads?: Array<{
+      node?: { name?: string };
+      path?: string;
+      assignedPath?: string;
+      meta?: { sym?: number; name?: string };
+    }>;
+    currentPad?: unknown;
+    refresh?: () => Promise<void>;
+    setProject?: (project: string) => Promise<void>;
+    setGroup?: (group: string) => Promise<void>;
+  };
+  uploader?: {
+    isUploading?: boolean;
+    fileCollection?: Array<{ status?: string }>;
+  };
+  sortedPads?: () => Pad["raw"][];
+  classifyFiles?: (files: File[]) => File[];
+  uploadFilesToPads?: (files: File[], pads: Pad["raw"][]) => Promise<void>;
+  getPadByNumber?: (number: string | number) => Pad["raw"] | null;
+  playPad?: (pad: Pad["raw"]) => Promise<void>;
+  clearPad?: (pad: Pad["raw"]) => Promise<void>;
+  downloadPad?: (pad: Pad["raw"]) => Promise<void>;
+  exportKitArchive?: () => Promise<void>;
+  importKitArchive?: (file: File) => Promise<void>;
+};
+
+type EngineState = {
+  ready: boolean;
+  connected: boolean;
+  deviceName: string;
+  target: string;
+  memory: string;
+  pads: Pad[];
+  activeProject: string;
+  activeGroup: string;
+  uploading: boolean;
+};
+
+const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
+  number: String(index + 1).padStart(2, "0"),
+  name: "",
+  type: "Unassigned",
+}));
 
 const projects = ["01", "02", "03", "04", "05", "06", "07", "08", "09"];
 const groups = ["A", "B", "C", "D"];
@@ -61,6 +105,73 @@ const nav = [
   [Archive, "Archive", "archive"],
 ] as const;
 
+function engineUrl() {
+  return import.meta.env.DEV ? "/legacy/engine.html?ep-modern-engine=1" : "../../data/engine.html?ep-modern-engine=1";
+}
+
+function formatBytes(value?: number) {
+  if (!Number.isFinite(value)) return "waiting";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = Number(value);
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function activeName(item?: { node?: { name?: string } }) {
+  return item?.node?.name || "";
+}
+
+function padNumber(name?: string) {
+  const index = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"].indexOf(name || "");
+  return index === -1 ? name || "--" : String(index + 1).padStart(2, "0");
+}
+
+function shortPath(path?: string) {
+  return path ? path.split("/").pop() || path : "";
+}
+
+function mapPads(bridge?: EngineBridge): Pad[] {
+  const pads = bridge?.device?.activePads || [];
+  if (!pads.length) return fallbackPads;
+  return [...pads]
+    .sort((a, b) => Number(padNumber(a.node?.name)) - Number(padNumber(b.node?.name)))
+    .map((pad) => {
+      const assigned = pad.assignedPath || "";
+      const soundId = pad.meta?.sym ? `Sound ${pad.meta.sym}` : "Unassigned";
+      return {
+        number: padNumber(pad.node?.name),
+        name: pad.meta?.name || shortPath(assigned),
+        type: assigned ? soundId : "Unassigned",
+        assignedPath: assigned,
+        size: assigned ? shortPath(assigned) : "drop sample",
+        raw: pad,
+      };
+    });
+}
+
+function snapshotEngine(bridge?: EngineBridge): EngineState {
+  const device = bridge?.device?.deviceService?.device;
+  const activeProject = activeName(bridge?.device?.activeProject);
+  const activeGroup = activeName(bridge?.device?.activeGroup);
+  const used = device?.metadata?.used_storage_bytes;
+  const free = device?.metadata?.free_storage_bytes;
+  return {
+    ready: Boolean(bridge),
+    connected: Boolean(bridge?.device?.deviceService),
+    deviceName: device?.name || "No device",
+    target: activeProject && activeGroup ? `P${activeProject} / ${activeGroup}` : "Select device",
+    memory: Number.isFinite(used) && Number.isFinite(free) ? `${formatBytes(used)} used` : "waiting",
+    pads: mapPads(bridge),
+    activeProject,
+    activeGroup,
+    uploading: Boolean(bridge?.uploader?.isUploading),
+  };
+}
+
 function useTheme() {
   const [dark, setDark] = useState(() => localStorage.getItem("ep-modern-theme") === "dark");
 
@@ -70,6 +181,79 @@ function useTheme() {
   }, [dark]);
 
   return { dark, setDark };
+}
+
+function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
+  const [state, setState] = useState<EngineState>(() => snapshotEngine());
+
+  const getBridge = useCallback(() => {
+    try {
+      return frameRef.current?.contentWindow?.ep133KitBridge as EngineBridge | undefined;
+    } catch {
+      return undefined;
+    }
+  }, [frameRef]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setState(snapshotEngine(getBridge()));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [getBridge]);
+
+  const run = useCallback(
+    async (operation: (bridge: EngineBridge) => Promise<void> | void) => {
+      const bridge = getBridge();
+      if (!bridge) {
+        setState(snapshotEngine());
+        return;
+      }
+      try {
+        await operation(bridge);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setState(snapshotEngine(bridge));
+      }
+    },
+    [getBridge],
+  );
+
+  return {
+    ...state,
+    refresh: () => run((bridge) => bridge.device?.refresh?.()),
+    setProject: (project: string) => run((bridge) => bridge.device?.setProject?.(project)),
+    setGroup: (group: string) => run((bridge) => bridge.device?.setGroup?.(group)),
+    uploadToPads: (files: File[], pads: Pad[]) =>
+      run((bridge) => {
+        const rawPads = pads.map((pad) => pad.raw || bridge.getPadByNumber?.(pad.number)).filter(Boolean);
+        return bridge.uploadFilesToPads?.(bridge.classifyFiles?.(files) || files, rawPads);
+      }),
+    playPad: (pad?: Pad) => run((bridge) => {
+      if (pad?.raw) return bridge.playPad?.(pad.raw);
+    }),
+    clearPad: (pad?: Pad) => run((bridge) => {
+      if (pad?.raw) return bridge.clearPad?.(pad.raw);
+    }),
+    downloadPad: (pad?: Pad) => run((bridge) => {
+      if (pad?.raw) return bridge.downloadPad?.(pad.raw);
+    }),
+    exportKit: () => run((bridge) => bridge.exportKitArchive?.()),
+    importKit: (file: File) => run((bridge) => bridge.importKitArchive?.(file)),
+  };
+}
+
+function DeviceEngineHost({ frameRef }: { frameRef: RefObject<HTMLIFrameElement | null> }) {
+  return (
+    <iframe
+      ref={frameRef}
+      title="EP-133 internal device engine"
+      src={engineUrl()}
+      aria-hidden="true"
+      tabIndex={-1}
+      className="pointer-events-none fixed -bottom-4 -right-4 h-px w-px opacity-0"
+    />
+  );
 }
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Gauge }) {
@@ -102,7 +286,17 @@ function SectionTitle({ icon: Icon, title, description }: { icon: typeof Gauge; 
   );
 }
 
-function PadGrid({ pads, selectedPad, onSelectPad }: { pads: Pad[]; selectedPad: string; onSelectPad: (pad: string) => void }) {
+function PadGrid({
+  pads,
+  selectedPad,
+  onSelectPad,
+  onDropPad,
+}: {
+  pads: Pad[];
+  selectedPad: string;
+  onSelectPad: (pad: string) => void;
+  onDropPad: (pad: Pad, files: File[]) => void;
+}) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {pads.map((pad) => {
@@ -112,6 +306,12 @@ function PadGrid({ pads, selectedPad, onSelectPad }: { pads: Pad[]; selectedPad:
           <button
             key={pad.number}
             onClick={() => onSelectPad(pad.number)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const files = Array.from(event.dataTransfer.files || []);
+              if (files.length) onDropPad(pad, files);
+            }}
             className={cn(
               "group min-h-28 rounded-lg border p-3 text-left transition hover:border-primary hover:bg-primary/5",
               selected && "border-primary bg-primary/10",
@@ -122,9 +322,9 @@ function PadGrid({ pads, selectedPad, onSelectPad }: { pads: Pad[]; selectedPad:
               <span className="text-xs font-semibold text-primary">PAD {pad.number}</span>
               <CircleDot className={cn("h-3.5 w-3.5", empty ? "text-muted-foreground" : "text-emerald-500")} />
             </div>
-            <div className="mt-4 text-sm font-medium">{pad.name || "empty"}</div>
+            <div className="mt-4 truncate text-sm font-medium">{pad.name || "empty"}</div>
             <div className="mt-1 text-xs text-muted-foreground">{pad.type}</div>
-            <div className="mt-3 text-xs text-muted-foreground">{pad.size || "drop sample"}</div>
+            <div className="mt-3 truncate text-xs text-muted-foreground">{pad.size || "drop sample"}</div>
           </button>
         );
       })}
@@ -171,7 +371,7 @@ function DspPanel() {
           <Button variant="outline" className="justify-start"><Save className="h-4 w-4" /> Save preset</Button>
           <Button variant="outline" className="justify-start"><RotateCcw className="h-4 w-4" /> Reset</Button>
           <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-            This panel maps to the existing browser-side DSP engine. The next migration step is moving those processors into typed React hooks.
+            Transfer-time DSP is preserved through the internal device engine while its processors are moved into React modules.
           </div>
         </CardContent>
       </Card>
@@ -179,7 +379,7 @@ function DspPanel() {
   );
 }
 
-function SamplePanel() {
+function SamplePanel({ selectedPad, assignFiles }: { selectedPad: string; assignFiles: (files: File[]) => void }) {
   const markers = [18, 39, 62, 81];
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
@@ -192,7 +392,7 @@ function SamplePanel() {
             <Button><Mic2 className="h-4 w-4" /> Record</Button>
             <Button variant="outline"><FolderInput className="h-4 w-4" /> Load file</Button>
             <Button variant="outline"><Scissors className="h-4 w-4" /> Detect chops</Button>
-            <Button variant="secondary"><Upload className="h-4 w-4" /> Assign to pads</Button>
+            <Button variant="secondary" onClick={() => assignFiles([])}><Upload className="h-4 w-4" /> Assign to pads</Button>
           </div>
           <div className="relative h-64 overflow-hidden rounded-lg border bg-zinc-950">
             <div className="absolute inset-x-6 top-1/2 h-px bg-emerald-400/30" />
@@ -222,15 +422,32 @@ function SamplePanel() {
           <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 4 equal chops</Button>
           <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 8 equal chops</Button>
           <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 12 equal chops</Button>
-          <Button className="justify-start"><Upload className="h-4 w-4" /> Assign from pad 1</Button>
+          <Button className="justify-start"><Upload className="h-4 w-4" /> Assign from pad {Number(selectedPad)}</Button>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selectedPad: string; setSelectedPad: (pad: string) => void }) {
-  const selected = pads.find((pad) => pad.number === selectedPad);
+function KitPanel({
+  engine,
+  selectedPad,
+  setSelectedPad,
+}: {
+  engine: ReturnType<typeof useDeviceEngine>;
+  selectedPad: string;
+  setSelectedPad: (pad: string) => void;
+}) {
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const selected = engine.pads.find((pad) => pad.number === selectedPad);
+
+  const uploadFiles = useCallback(
+    async (files: File[], targetPads?: Pad[]) => {
+      if (!files.length) return;
+      await engine.uploadToPads(files, targetPads || engine.pads);
+    },
+    [engine],
+  );
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
@@ -239,13 +456,33 @@ function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selected
           <div className="flex flex-wrap items-start justify-between gap-4">
             <SectionTitle icon={LayoutDashboard} title="Kit Builder" description="Inspect assignments, drop kits, import, and archive." />
             <div className="flex gap-2">
-              <Button variant="outline"><Archive className="h-4 w-4" /> Import</Button>
-              <Button><Download className="h-4 w-4" /> Export</Button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) engine.importKit(file);
+                }}
+              />
+              <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!engine.connected}>
+                <Archive className="h-4 w-4" /> Import
+              </Button>
+              <Button onClick={engine.exportKit} disabled={!engine.connected}>
+                <Download className="h-4 w-4" /> Export
+              </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <PadGrid pads={pads} selectedPad={selectedPad} onSelectPad={setSelectedPad} />
+          <PadGrid
+            pads={engine.pads}
+            selectedPad={selectedPad}
+            onSelectPad={setSelectedPad}
+            onDropPad={(pad, files) => uploadFiles(files, [pad])}
+          />
         </CardContent>
       </Card>
       <Card>
@@ -258,7 +495,9 @@ function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selected
             <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Project</div>
             <div className="grid grid-cols-3 gap-2">
               {projects.map((project) => (
-                <Button key={project} variant={project === "03" ? "default" : "outline"}>{project}</Button>
+                <Button key={project} variant={project === engine.activeProject ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setProject(project)}>
+                  {project}
+                </Button>
               ))}
             </div>
           </div>
@@ -266,7 +505,9 @@ function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selected
             <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Group</div>
             <div className="grid grid-cols-4 gap-2">
               {groups.map((group) => (
-                <Button key={group} variant={group === "D" ? "default" : "outline"}>{group}</Button>
+                <Button key={group} variant={group === engine.activeGroup ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setGroup(group)}>
+                  {group}
+                </Button>
               ))}
             </div>
           </div>
@@ -274,8 +515,20 @@ function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selected
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Selected pad</div>
             <div className="mt-1 text-sm font-medium">Pad {selected?.number}: {selected?.name || "empty"}</div>
             <div className="mt-1 text-xs text-muted-foreground">{selected?.type}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => engine.playPad(selected)} disabled={!selected?.assignedPath}>Play</Button>
+              <Button size="sm" variant="outline" onClick={() => engine.downloadPad(selected)} disabled={!selected?.assignedPath}>WAV</Button>
+              <Button size="sm" variant="outline" onClick={() => engine.clearPad(selected)} disabled={!selected?.assignedPath}>Clear</Button>
+            </div>
           </div>
-          <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+          <div
+            className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              uploadFiles(Array.from(event.dataTransfer.files || []));
+            }}
+          >
             Drop a folder of 12 sounds to auto-map a kit.
           </div>
         </CardContent>
@@ -284,7 +537,8 @@ function KitPanel({ pads, selectedPad, setSelectedPad }: { pads: Pad[]; selected
   );
 }
 
-function ArchivePanel() {
+function ArchivePanel({ engine }: { engine: ReturnType<typeof useDeviceEngine> }) {
+  const fileInput = useRef<HTMLInputElement | null>(null);
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
@@ -292,8 +546,19 @@ function ArchivePanel() {
           <SectionTitle icon={Archive} title="Kit Archives" description="Export and restore kits as portable ZIP files." />
         </CardHeader>
         <CardContent className="grid gap-3">
-          <Button><Download className="h-4 w-4" /> Export active kit</Button>
-          <Button variant="outline"><Archive className="h-4 w-4" /> Import kit archive</Button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.currentTarget.value = "";
+              if (file) engine.importKit(file);
+            }}
+          />
+          <Button onClick={engine.exportKit} disabled={!engine.connected}><Download className="h-4 w-4" /> Export active kit</Button>
+          <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!engine.connected}><Archive className="h-4 w-4" /> Import kit archive</Button>
           <Button variant="outline"><Search className="h-4 w-4" /> Inspect manifest</Button>
         </CardContent>
       </Card>
@@ -315,44 +580,17 @@ function ArchivePanel() {
   );
 }
 
-function DevicePanel({ onClose }: { onClose: () => void }) {
-  const legacyUrl = import.meta.env.DEV ? "/legacy/index.html?ep-modern-engine=1" : "../../data/index.html?ep-modern-engine=1";
-
-  return (
-    <Card className="overflow-hidden">
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <SectionTitle icon={HardDrive} title="Device Engine" description="The existing TE runtime is embedded here while MIDI/Sysex services are migrated." />
-          <div className="flex gap-2">
-            <Button variant="outline" asChild>
-              <a href={legacyUrl} target="_blank" rel="noreferrer">
-                <Cable className="h-4 w-4" /> Open engine
-              </a>
-            </Button>
-            <Button variant="secondary" onClick={onClose}>Close</Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <iframe
-          title="Legacy EP device engine"
-          src={legacyUrl}
-          className="h-[720px] w-full border-0 bg-muted"
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
 export function App() {
   const { dark, setDark } = useTheme();
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const engine = useDeviceEngine(frameRef);
   const [tab, setTab] = useState("kit");
-  const [engineOpen, setEngineOpen] = useState(false);
   const [selectedPad, setSelectedPad] = useState("01");
-  const usedPads = useMemo(() => initialPads.filter((pad) => pad.name).length, []);
+  const usedPads = useMemo(() => engine.pads.filter((pad) => pad.name).length, [engine.pads]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <DeviceEngineHost frameRef={frameRef} />
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-sidebar lg:block">
         <div className="flex h-16 items-center gap-2 border-b px-5">
           <div className="rounded-md bg-primary p-2 text-primary-foreground">
@@ -390,15 +628,16 @@ export function App() {
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               {dark ? "Light" : "Dark"}
             </Button>
-            <Button variant="outline" onClick={() => setEngineOpen((open) => !open)}><Cable className="h-4 w-4" /> Engine</Button>
-            <Button><Usb className="h-4 w-4" /> Connect</Button>
+            <Button variant="outline" onClick={engine.refresh}>
+              <Usb className="h-4 w-4" /> {engine.connected ? "Refresh" : "Connect"}
+            </Button>
           </div>
         </header>
         <div className="grid gap-6 p-6">
           <div className="grid gap-4 md:grid-cols-4">
-            <Stat label="Device" value="EP series" icon={Usb} />
-            <Stat label="Target" value="P03 / D" icon={LayoutDashboard} />
-            <Stat label="Memory" value="89.34 MB" icon={Gauge} />
+            <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
+            <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
+            <Stat label="Memory" value={engine.memory} icon={Gauge} />
             <Stat label="Pads used" value={`${usedPads}/12`} icon={AudioLines} />
           </div>
           <Tabs value={tab} onValueChange={setTab}>
@@ -408,12 +647,11 @@ export function App() {
               <TabsTrigger value="dsp">DSP</TabsTrigger>
               <TabsTrigger value="archive">Archive</TabsTrigger>
             </TabsList>
-            <TabsContent value="kit"><KitPanel pads={initialPads} selectedPad={selectedPad} setSelectedPad={setSelectedPad} /></TabsContent>
-            <TabsContent value="sample"><SamplePanel /></TabsContent>
+            <TabsContent value="kit"><KitPanel engine={engine} selectedPad={selectedPad} setSelectedPad={setSelectedPad} /></TabsContent>
+            <TabsContent value="sample"><SamplePanel selectedPad={selectedPad} assignFiles={(files) => engine.uploadToPads(files, engine.pads.slice(Number(selectedPad) - 1))} /></TabsContent>
             <TabsContent value="dsp"><DspPanel /></TabsContent>
-            <TabsContent value="archive"><ArchivePanel /></TabsContent>
+            <TabsContent value="archive"><ArchivePanel engine={engine} /></TabsContent>
           </Tabs>
-          {engineOpen && <DevicePanel onClose={() => setEngineOpen(false)} />}
         </div>
       </main>
     </div>

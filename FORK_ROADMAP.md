@@ -17,7 +17,7 @@ The modern shell is the new primary UI direction:
 - A production build path through `npm run modern:build`.
 - Electron loads `modern/dist/index.html` when it exists, falling back to the original app if the modern build has not been generated.
 
-The hardware runtime is currently bridged through the original bundled app in the `Device` tab. In development, Vite serves the original `data/` app under `/legacy`; in packaged Electron builds, the iframe points back to `data/index.html`. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules.
+The hardware runtime is currently bridged through a hidden internal engine document at `data/engine.html`. In development, Vite serves it under `/legacy/engine.html`; in packaged Electron builds, the hidden iframe points back to `data/engine.html`. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules. The original app is no longer presented as a user-facing tab or panel in the modern UI.
 
 ### Feature sidebar
 
@@ -101,7 +101,7 @@ System audio capture depends on the Chromium/WebRTC picker and host OS permissio
 ### Device service extraction
 
 - Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
-- Replace the `Device` iframe bridge with native React controls.
+- Replace the hidden compatibility iframe with native React device-service modules.
 - Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
 - Keep the legacy app as an optional troubleshooting fallback until the native service is feature complete.
 

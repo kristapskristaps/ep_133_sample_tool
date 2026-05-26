@@ -629,6 +629,13 @@
   bridge.uploadFilesToPads = uploadFilesToPads;
   bridge.sortedPads = sortedPads;
   bridge.padOrder = PAD_ORDER;
+  bridge.classifyFiles = classifyFiles;
+  bridge.getPadByNumber = (number) => sortedPads()[Math.max(0, Math.min(11, Number(number) - 1))] || null;
+  bridge.playPad = playPad;
+  bridge.clearPad = clearPad;
+  bridge.downloadPad = downloadPad;
+  bridge.exportKitArchive = exportKitArchive;
+  bridge.importKitArchive = importKitArchive;
 
   function buildPanel() {
     const panel = document.createElement("section");
