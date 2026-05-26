@@ -3,14 +3,15 @@
   right: 16px;
   top: 16px;
   z-index: 10000;
-  width: 336px;
+  width: 348px;
   max-height: calc(100vh - 32px);
   overflow: auto;
-  background: #101214;
-  color: #f4f4f4;
-  border: 1px solid #00a69c;
-  box-shadow: 4px 4px 0 #000;
-  font: 12px/1.35 Arial, sans-serif;
+  background: var(--ui-scheme-1-bg, #dbdddb);
+  color: var(--ui-scheme-1-fg, #000);
+  border: 1px solid var(--ui-scheme-1-border, #000);
+  box-shadow: 3px 3px 0 var(--ui-scheme-1-shadow, #000005);
+  font: 11px/1.25 Technotype34Regular, Arial, sans-serif;
+  text-transform: uppercase;
 }
 
 #ep133-kit-inspector * {
@@ -22,21 +23,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  background: #00a69c;
-  color: #000;
+  min-height: 28px;
+  padding: 6px 8px;
+  background: var(--ep-display-sample-size, #00a69c);
+  color: var(--ep-bpm-contrast, #000005);
+  border-bottom: 1px solid var(--ui-scheme-1-border, #000);
   font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  letter-spacing: .06em;
 }
 
 #ep133-kit-inspector button {
-  border: 1px solid #000;
-  background: #dbdddb;
-  color: #000;
+  min-height: 20px;
+  border: 1px solid var(--ui-scheme-1-border, #000);
+  background: var(--ui-scheme-2-bg, #818e95);
+  color: var(--ui-scheme-2-fg, #000);
   cursor: pointer;
   font: inherit;
-  padding: 3px 7px;
+  padding: 2px 7px;
+  text-transform: uppercase;
 }
 
 #ep133-kit-inspector button:disabled {
@@ -50,65 +54,73 @@
 
 #ep133-kit-body {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
 }
 
 .ep133-kit-row {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
   flex-wrap: wrap;
 }
 
 .ep133-kit-label {
-  color: #9aa0a9;
-  min-width: 48px;
-  text-transform: uppercase;
+  color: var(--ui-scheme-1-fg2, #818e95);
+  min-width: 50px;
   font-size: 10px;
   letter-spacing: .06em;
 }
 
 .ep133-kit-row button.active {
-  background: #ef4e34;
+  background: var(--accent, #f15a22);
+  color: var(--ui-scheme-3-fg, #000);
 }
 
 #ep133-kit-pads {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: 5px;
 }
 
 .ep133-kit-pad {
-  min-height: 70px;
-  border: 1px solid #343a40;
-  background: #181b1f;
-  color: #f4f4f4;
-  padding: 6px;
+  min-height: 76px;
+  border: 1px solid var(--ep-edges, #000);
+  background: var(--ep-btn-pad, #232424);
+  color: var(--base-txt, #e5e6e6);
+  padding: 5px;
   display: grid;
   gap: 4px;
+  align-content: start;
 }
 
 .ep133-kit-pad.assigned {
-  border-color: #00a69c;
+  border-color: var(--ep-display-sample-size, #00a69c);
+  box-shadow: inset 0 0 0 1px var(--ep-display-sample-size, #00a69c);
 }
 
 .ep133-kit-pad.drop-target {
-  outline: 2px solid #ef4e34;
+  outline: 2px solid var(--accent, #f15a22);
+  outline-offset: -2px;
 }
 
 .ep133-kit-pad-num {
-  color: #ef4e34;
+  color: var(--accent, #f15a22);
   font-weight: 700;
+  letter-spacing: .06em;
 }
 
 .ep133-kit-pad-name {
-  min-height: 28px;
+  min-height: 26px;
+  max-height: 32px;
+  overflow: hidden;
   word-break: break-word;
+  color: var(--base-txt, #e5e6e6);
+  text-transform: none;
 }
 
 .ep133-kit-pad-meta {
-  color: #9aa0a9;
+  color: var(--ep-btn-contrast, #8a959a);
   font-size: 10px;
 }
 
@@ -118,24 +130,42 @@
 }
 
 .ep133-kit-actions button {
-  padding: 1px 5px;
-  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  padding: 1px 3px;
+  font-size: 10px;
+  background: var(--ep-btn-shift, #b0babe);
 }
 
 #ep133-kit-drop {
-  border: 1px dashed #69727c;
-  padding: 10px;
+  border: 1px dashed var(--ui-scheme-1-border, #000);
+  padding: 9px 10px;
   text-align: center;
-  color: #cfd3d8;
-  background: #15181b;
+  color: var(--ui-scheme-1-fg, #000);
+  background: var(--ui-scheme-1-divider, #d2d3d4);
+  letter-spacing: .04em;
 }
 
 #ep133-kit-drop.drop-target {
-  border-color: #ef4e34;
-  color: #fff;
+  border-color: var(--accent, #f15a22);
+  background: var(--ui-scheme-3-bg, var(--accent, #f15a22));
+  color: var(--ui-scheme-3-fg, #000);
 }
 
 #ep133-kit-status {
   min-height: 16px;
-  color: #00d0c7;
+  color: var(--ep-display-sample-size, #00a69c);
+  word-break: break-word;
+}
+
+@media (max-width: 880px) {
+  #ep133-kit-inspector {
+    right: 8px;
+    top: 8px;
+    width: min(348px, calc(50vw - 12px));
+  }
+
+  #ep133-kit-pads {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
