@@ -330,6 +330,34 @@
     return output;
   }
 
+  async function readZip(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const decoder = new TextDecoder();
+    const entries = new Map();
+    let offset = 0;
+
+    while (offset + 30 <= bytes.length) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset + offset);
+      if (view.getUint32(0, true) !== 0x04034b50) break;
+      const method = view.getUint16(8, true);
+      const compressedSize = view.getUint32(18, true);
+      const uncompressedSize = view.getUint32(22, true);
+      const nameLength = view.getUint16(26, true);
+      const extraLength = view.getUint16(28, true);
+      const nameStart = offset + 30;
+      const dataStart = nameStart + nameLength + extraLength;
+      const dataEnd = dataStart + compressedSize;
+      if (method !== 0) throw new Error("kit zip uses unsupported compression");
+      const name = decoder.decode(bytes.slice(nameStart, nameStart + nameLength));
+      const data = bytes.slice(dataStart, dataEnd);
+      if (data.length !== uncompressedSize) throw new Error("kit zip entry is corrupt");
+      entries.set(name, new Blob([data]));
+      offset = dataEnd;
+    }
+
+    return entries;
+  }
+
   async function createZip(entries) {
     const encoder = new TextEncoder();
     const now = dosDateTime(new Date());
@@ -469,6 +497,42 @@
     }
   }
 
+  async function importKitArchive(file) {
+    if (!file) return;
+    if (ui.busy) return;
+    ui.busy = true;
+    try {
+      setStatus("reading kit archive");
+      const entries = await readZip(file);
+      const manifestBlob = entries.get("kit.json");
+      if (!manifestBlob) throw new Error("kit.json missing");
+      const manifest = JSON.parse(await manifestBlob.text());
+      if (!manifest || !Array.isArray(manifest.pads)) throw new Error("invalid kit archive");
+
+      const pads = sortedPads();
+      const files = [];
+      const targetPads = [];
+      for (const item of manifest.pads) {
+        const blob = entries.get(item.file);
+        const padIndex = Number(item.pad) - 1;
+        const pad = pads[padIndex];
+        if (blob && pad) {
+          files.push(new File([blob], shortPath(item.file), { type: "audio/wav" }));
+          targetPads.push(pad);
+        }
+      }
+
+      if (!files.length) throw new Error("kit archive has no usable samples");
+      setStatus(`importing ${files.length} pad${files.length === 1 ? "" : "s"}`);
+      await uploadFilesToPads(files, targetPads);
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "kit import failed");
+    } finally {
+      ui.busy = false;
+    }
+  }
+
   function renderSelectors() {
     const project = activeName(bridge.device.activeProject);
     const group = activeName(bridge.device.activeGroup);
@@ -577,19 +641,27 @@
         <div id="ep133-kit-pads"></div>
         <div class="ep133-kit-row">
           <button type="button" id="ep133-kit-refresh">refresh</button>
+          <button type="button" id="ep133-kit-import">import kit</button>
           <button type="button" id="ep133-kit-export">export kit</button>
+          <input id="ep133-kit-import-file" type="file" accept=".zip,application/zip">
           <span id="ep133-kit-status"></span>
         </div>
       </div>
     `;
     ui.panel = panel;
-    ui.body = byId("ep133-kit-body");
-    ui.pads = byId("ep133-kit-pads");
-    ui.status = byId("ep133-kit-status");
-    ui.drop = byId("ep133-kit-drop");
+    ui.body = panel.querySelector("#ep133-kit-body");
+    ui.pads = panel.querySelector("#ep133-kit-pads");
+    ui.status = panel.querySelector("#ep133-kit-status");
+    ui.drop = panel.querySelector("#ep133-kit-drop");
 
-    byId("ep133-kit-refresh").addEventListener("click", refresh);
-    byId("ep133-kit-export").addEventListener("click", exportKitArchive);
+    panel.querySelector("#ep133-kit-refresh").addEventListener("click", refresh);
+    panel.querySelector("#ep133-kit-export").addEventListener("click", exportKitArchive);
+    panel.querySelector("#ep133-kit-import").addEventListener("click", () => panel.querySelector("#ep133-kit-import-file").click());
+    panel.querySelector("#ep133-kit-import-file").addEventListener("change", (event) => {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      importKitArchive(file);
+    });
     ui.drop.addEventListener("dragover", (event) => {
       event.preventDefault();
       ui.drop.classList.add("drop-target");

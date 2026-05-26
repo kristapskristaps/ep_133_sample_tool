@@ -112,6 +112,10 @@
   text-transform: none;
 }
 
+#ep133-kit-import-file {
+  display: none;
+}
+
 @media (max-width: 980px) {
   #ep133-kit-pads {
     grid-template-columns: repeat(2, 1fr);
