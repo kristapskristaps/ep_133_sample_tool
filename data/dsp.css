@@ -1,0 +1,77 @@
+#ep133-dsp-panel {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 10000;
+  width: 286px;
+  background: #111;
+  color: #f1f1f1;
+  border: 1px solid #ef4e34;
+  box-shadow: 4px 4px 0 #000;
+  font: 12px/1.35 Arial, sans-serif;
+}
+
+#ep133-dsp-panel * {
+  box-sizing: border-box;
+}
+
+#ep133-dsp-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #ef4e34;
+  color: #000;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+#ep133-dsp-panel button,
+#ep133-dsp-panel input {
+  font: inherit;
+}
+
+#ep133-dsp-panel button {
+  border: 1px solid #000;
+  background: #dbdddb;
+  color: #000;
+  cursor: pointer;
+  padding: 2px 7px;
+}
+
+#ep133-dsp-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+#ep133-dsp-panel.collapsed #ep133-dsp-body {
+  display: none;
+}
+
+.ep133-dsp-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ep133-dsp-row input[type="number"] {
+  width: 70px;
+  border: 1px solid #555;
+  background: #222;
+  color: #fff;
+  padding: 3px 5px;
+}
+
+.ep133-dsp-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+#ep133-dsp-status {
+  min-height: 16px;
+  color: #00d0c7;
+}
