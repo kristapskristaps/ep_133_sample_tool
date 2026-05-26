@@ -42,7 +42,7 @@
 }
 
 .ep133-kit-label {
-  color: var(--ui-scheme-1-fg2, #818e95);
+  color: var(--drawer-muted);
   min-width: 50px;
   font-size: 10px;
   letter-spacing: .08em;
@@ -61,9 +61,9 @@
 
 .ep133-kit-pad {
   min-height: 76px;
-  border: 1px solid var(--ep-edges, #000);
-  background: var(--ep-btn-pad, #232424);
-  color: var(--base-txt, #e5e6e6);
+  border: 1px solid var(--drawer-line);
+  background: var(--drawer-card-bg);
+  color: var(--drawer-card-fg);
   padding: 5px;
   display: grid;
   gap: 4px;
@@ -90,13 +90,13 @@
   min-height: 26px;
   max-height: 32px;
   overflow: hidden;
-  color: var(--base-txt, #e5e6e6);
+  color: var(--drawer-card-fg);
   text-transform: none;
   word-break: break-word;
 }
 
 .ep133-kit-pad-meta {
-  color: var(--ep-btn-contrast, #8a959a);
+  color: var(--drawer-card-muted);
   font-size: 10px;
 }
 
@@ -110,7 +110,8 @@
   min-width: 0;
   min-height: 18px;
   padding: 1px 3px;
-  background: var(--ep-btn-shift, #b0babe);
+  background: var(--drawer-button-bg);
+  color: var(--drawer-button-fg);
   font-size: 10px;
 }
 
@@ -118,8 +119,8 @@
   border: 1px dashed var(--ui-scheme-1-border, #000);
   padding: 9px 10px;
   text-align: center;
-  color: var(--ui-scheme-1-fg, #000);
-  background: var(--ui-scheme-1-divider, #d2d3d4);
+  color: var(--drawer-card-fg);
+  background: var(--drawer-card-bg);
   letter-spacing: .05em;
 }
 

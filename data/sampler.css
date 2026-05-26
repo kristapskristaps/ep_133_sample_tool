@@ -49,7 +49,8 @@
   gap: 6px;
   min-height: 22px;
   padding: 4px 6px;
-  background: var(--ui-scheme-1-divider, #d2d3d4);
+  background: var(--drawer-card-bg);
+  color: var(--drawer-card-fg);
 }
 
 .ep133-sampler-field input {

@@ -7,6 +7,11 @@
   --drawer-muted: var(--ui-scheme-1-fg2, #818e95);
   --drawer-display: var(--ep-display, #000005);
   --drawer-display-text: var(--ep-display-sample-size, #00a69c);
+  --drawer-card-bg: var(--library-tab-selected, var(--ui-scheme-1-bg, #dbdddb));
+  --drawer-card-fg: var(--library-tab-selected-txt, var(--ui-scheme-1-fg, #000));
+  --drawer-card-muted: var(--library-row-txt-inactive, var(--ui-scheme-1-fg2, #818e95));
+  --drawer-button-bg: var(--library-download-sample, var(--ui-scheme-2-bg, #818e95));
+  --drawer-button-fg: var(--library-download-sample-txt, var(--ui-scheme-2-fg, #000));
   box-sizing: border-box;
   color: var(--drawer-text);
   background: var(--drawer-bg);
@@ -41,8 +46,8 @@
 .ep133-utility-drawer button {
   min-height: 20px;
   border: 1px solid var(--drawer-line);
-  background: var(--ui-scheme-2-bg, #818e95);
-  color: var(--ui-scheme-2-fg, #000);
+  background: var(--drawer-button-bg);
+  color: var(--drawer-button-fg);
   cursor: pointer;
   padding: 2px 7px;
   text-transform: uppercase;
@@ -87,12 +92,13 @@
   display: grid;
   gap: 4px;
   padding: 6px;
-  background: var(--drawer-soft);
+  background: var(--drawer-card-bg);
+  color: var(--drawer-card-fg);
   border: 1px solid color-mix(in srgb, var(--drawer-line) 45%, transparent);
 }
 
 .ep133-dsp-group-title {
-  color: var(--drawer-muted);
+  color: var(--drawer-card-muted);
   font-size: 10px;
   letter-spacing: .08em;
 }
@@ -103,7 +109,7 @@
   align-items: center;
   gap: 8px;
   min-height: 22px;
-  color: var(--drawer-text);
+  color: var(--drawer-card-fg);
 }
 
 .ep133-dsp-row input[type="number"] {
