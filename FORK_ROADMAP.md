@@ -27,6 +27,7 @@ Current workspace flow:
 - Open a sampling/chopping modal from the selected pad.
 - Apply transfer DSP from the same workspace through `Sample Settings`.
 - Import, export, and inspect the active kit from the main view.
+- Manage the device sample library and memory from the same workspace.
 
 ### Legacy feature sidebar
 
@@ -82,6 +83,7 @@ Current kit workflow:
 - Drop one sample on a pad to upload and assign it.
 - Drop a folder or batch of up to 12 audio files on the kit drop zone to auto-sort and assign pads.
 - Play, download as WAV, or clear an assigned pad.
+- Browse loaded samples, see memory usage, upload library samples, preview, download WAVs, and delete samples.
 - Export the active group as a kit archive ZIP containing assigned pad WAV files and a `kit.json` manifest.
 - Import a kit archive ZIP exported by this fork and restore its samples to the matching active-group pads.
 

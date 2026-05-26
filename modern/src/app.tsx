@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
   AudioLines,
@@ -34,6 +34,20 @@ type Pad = {
   raw?: unknown;
 };
 
+type Sound = {
+  id: number;
+  name: string;
+  path?: string;
+  size?: string;
+  meta?: {
+    name?: string;
+    channels?: number;
+    samplerate?: number;
+    format?: string;
+  };
+  raw?: unknown;
+};
+
 type EngineBridge = {
   device?: {
     deviceService?: {
@@ -46,6 +60,9 @@ type EngineBridge = {
           free_storage_bytes?: number;
         };
       };
+      playback?: (path: string, preview?: boolean) => Promise<void>;
+      deleteSound?: (path: string) => Promise<void>;
+      downloadSoundAsWav?: (path: string) => Promise<Blob>;
     };
     activeProject?: { node?: { name?: string } };
     activeGroup?: { node?: { name?: string } };
@@ -68,6 +85,14 @@ type EngineBridge = {
   uploader?: {
     isUploading?: boolean;
     fileCollection?: Array<{ status?: string }>;
+    sounds?: Array<{
+      id?: number;
+      path?: string;
+      file?: { size?: number };
+      meta?: Sound["meta"];
+    }>;
+    enqueueFiles?: (startId: number, files: File[]) => Error | undefined;
+    findNextFreeSoundSlot?: (startId?: number) => number;
   };
   sortedPads?: () => Pad["raw"][];
   classifyFiles?: (files: File[]) => File[];
@@ -91,6 +116,8 @@ type EngineState = {
   activeGroup: string;
   uploading: boolean;
   status: string;
+  sounds: Sound[];
+  memoryUsedPercent: number;
 };
 
 type SampleSettings = {
@@ -196,12 +223,26 @@ function mapPads(bridge?: EngineBridge): Pad[] {
     });
 }
 
+function mapSounds(bridge?: EngineBridge): Sound[] {
+  return (bridge?.uploader?.sounds || [])
+    .filter((sound) => sound?.id && sound.path)
+    .map((sound) => ({
+      id: Number(sound.id),
+      name: sound.meta?.name || shortPath(sound.path) || `Sound ${sound.id}`,
+      path: sound.path,
+      meta: sound.meta,
+      size: formatBytes(sound.file?.size),
+      raw: sound,
+    }));
+}
+
 function snapshotEngine(bridge?: EngineBridge): EngineState {
   const device = bridge?.device?.deviceService?.device;
   const activeProject = activeName(bridge?.device?.activeProject);
   const activeGroup = activeName(bridge?.device?.activeGroup);
   const used = device?.metadata?.used_storage_bytes;
   const free = device?.metadata?.free_storage_bytes;
+  const capacity = Number(used || 0) + Number(free || 0);
   return {
     ready: Boolean(bridge),
     connected: Boolean(bridge?.device?.deviceService),
@@ -212,6 +253,8 @@ function snapshotEngine(bridge?: EngineBridge): EngineState {
     activeProject,
     activeGroup,
     uploading: Boolean(bridge?.uploader?.isUploading),
+    sounds: mapSounds(bridge),
+    memoryUsedPercent: capacity > 0 ? Math.round((Number(used || 0) / capacity) * 100) : 0,
     status: !bridge
       ? "Engine loading"
       : bridge.device?.deviceService
@@ -316,6 +359,33 @@ function useDeviceEngine() {
         const rawPads = pads.map((pad) => pad.raw || bridge.getPadByNumber?.(pad.number)).filter(Boolean);
         return bridge.uploadFilesToPads?.(bridge.classifyFiles?.(files) || files, rawPads);
       }),
+    uploadSamples: (files: File[]) =>
+      run((bridge) => {
+        const startId = bridge.uploader?.findNextFreeSoundSlot?.(1);
+        if (!startId || startId === -1) return;
+        const error = bridge.uploader?.enqueueFiles?.(startId, bridge.classifyFiles?.(files) || files);
+        if (error) throw error;
+      }),
+    playSound: (sound?: Sound) => run((bridge) => {
+      if (sound?.path) return bridge.device?.deviceService?.playback?.(sound.path, true);
+    }),
+    deleteSound: (sound?: Sound) => run(async (bridge) => {
+      if (!sound?.path) return;
+      await bridge.device?.deviceService?.deleteSound?.(sound.path);
+      await bridge.device?.refresh?.();
+    }),
+    downloadSound: (sound?: Sound) => run(async (bridge) => {
+      if (!sound?.path) return;
+      const blob = await bridge.device?.deviceService?.downloadSoundAsWav?.(sound.path);
+      if (!blob) return;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${String(sound.id).padStart(3, "0")} ${sound.name || "sample"}.wav`;
+      document.body.append(link);
+      link.click();
+      URL.revokeObjectURL(link.href);
+      link.remove();
+    }),
     playPad: (pad?: Pad) => run((bridge) => {
       if (pad?.raw) return bridge.playPad?.(pad.raw);
     }),
@@ -585,6 +655,88 @@ function SampleModal({
   );
 }
 
+function SampleManager({
+  engine,
+}: {
+  engine: ReturnType<typeof useDeviceEngine>;
+}) {
+  const uploadInput = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const sounds = engine.sounds.filter((sound) => {
+    const text = `${sound.id} ${sound.name} ${sound.path || ""}`.toLowerCase();
+    return text.includes(query.toLowerCase());
+  });
+  const selected = sounds.find((sound) => sound.id === selectedId) || sounds[0];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <SectionTitle icon={Archive} title="Sample Library" description="Manage device memory and all loaded samples." />
+          <div className="flex gap-2">
+            <input
+              ref={uploadInput}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.currentTarget.value = "";
+                if (files.length) void engine.uploadSamples(files);
+              }}
+            />
+            <Button variant="outline" onClick={() => uploadInput.current?.click()} disabled={!engine.connected}>
+              <Upload className="h-4 w-4" /> Upload
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{engine.memory}</span>
+            <span>{engine.memoryUsedPercent}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-primary" style={{ width: `${Math.min(100, engine.memoryUsedPercent)}%` }} />
+          </div>
+        </div>
+        <label className="grid gap-1 text-xs text-muted-foreground">
+          Search samples
+          <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <div className="grid max-h-80 gap-2 overflow-auto pr-1">
+          {sounds.length ? sounds.slice(0, 80).map((sound) => (
+            <button
+              key={sound.id}
+              onClick={() => setSelectedId(sound.id)}
+              className={cn(
+                "grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-background p-2 text-left text-sm transition hover:border-primary",
+                selected?.id === sound.id && "border-primary bg-primary/10",
+              )}
+            >
+              <span className="font-mono text-xs text-muted-foreground">{String(sound.id).padStart(3, "0")}</span>
+              <span className="truncate font-medium">{sound.name}</span>
+              <span className="text-xs text-muted-foreground">{sound.size}</span>
+            </button>
+          )) : (
+            <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              {engine.connected ? "No samples loaded." : "Connect a device to load samples."}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <Button size="sm" variant="outline" onClick={() => engine.playSound(selected)} disabled={!selected}>Play</Button>
+          <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>WAV</Button>
+          <Button size="sm" variant="outline" onClick={() => engine.deleteSound(selected)} disabled={!selected}>Delete</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function Workspace({
   engine,
   selectedPad,
@@ -731,6 +883,7 @@ function Workspace({
         </Card>
 
         <SampleSettingsPanel settings={settings} setSettings={setSettings} />
+        <SampleManager engine={engine} />
       </div>
     </div>
   );
@@ -742,7 +895,6 @@ export function App() {
   const [selectedPad, setSelectedPad] = useState("01");
   const [settings, setSettings] = useState<SampleSettings>(defaultSettings);
   const [samplerOpen, setSamplerOpen] = useState(false);
-  const usedPads = useMemo(() => engine.pads.filter((pad) => pad.name).length, [engine.pads]);
   const selected = engine.pads.find((pad) => pad.number === selectedPad);
 
   useEffect(() => {
@@ -790,7 +942,7 @@ export function App() {
             <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
             <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
             <Stat label="Memory" value={engine.memory} icon={Gauge} />
-            <Stat label="Pads used" value={`${usedPads}/12`} icon={AudioLines} />
+            <Stat label="Samples" value={`${engine.sounds.length}`} icon={AudioLines} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/35 px-4 py-3 text-sm">
             <span className="text-muted-foreground">Status</span>
