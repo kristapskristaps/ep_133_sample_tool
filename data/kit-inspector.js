@@ -68,6 +68,10 @@
     return path ? path.split("/").pop() || path : "";
   }
 
+  function safeName(value) {
+    return String(value || "kit").replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "kit";
+  }
+
   function padLabel(name) {
     const index = PAD_ORDER.indexOf(name);
     return index === -1 ? name : String(index + 1).padStart(2, "0");
@@ -292,6 +296,179 @@
     }
   }
 
+  function crc32(bytes) {
+    let crc = -1;
+    for (let i = 0; i < bytes.length; i++) {
+      crc ^= bytes[i];
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+    return (crc ^ -1) >>> 0;
+  }
+
+  function dosDateTime(date) {
+    const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+    const day = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    return { time, day };
+  }
+
+  function writeUint16(view, offset, value) {
+    view.setUint16(offset, value, true);
+  }
+
+  function writeUint32(view, offset, value) {
+    view.setUint32(offset, value >>> 0, true);
+  }
+
+  function concatBytes(parts) {
+    const length = parts.reduce((sum, part) => sum + part.length, 0);
+    const output = new Uint8Array(length);
+    let offset = 0;
+    parts.forEach((part) => {
+      output.set(part, offset);
+      offset += part.length;
+    });
+    return output;
+  }
+
+  async function createZip(entries) {
+    const encoder = new TextEncoder();
+    const now = dosDateTime(new Date());
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    for (const entry of entries) {
+      const name = encoder.encode(entry.name);
+      const data = new Uint8Array(await entry.blob.arrayBuffer());
+      const crc = crc32(data);
+      const local = new Uint8Array(30 + name.length);
+      const localView = new DataView(local.buffer);
+      writeUint32(localView, 0, 0x04034b50);
+      writeUint16(localView, 4, 20);
+      writeUint16(localView, 6, 0);
+      writeUint16(localView, 8, 0);
+      writeUint16(localView, 10, now.time);
+      writeUint16(localView, 12, now.day);
+      writeUint32(localView, 14, crc);
+      writeUint32(localView, 18, data.length);
+      writeUint32(localView, 22, data.length);
+      writeUint16(localView, 26, name.length);
+      writeUint16(localView, 28, 0);
+      local.set(name, 30);
+      localParts.push(local, data);
+
+      const central = new Uint8Array(46 + name.length);
+      const centralView = new DataView(central.buffer);
+      writeUint32(centralView, 0, 0x02014b50);
+      writeUint16(centralView, 4, 20);
+      writeUint16(centralView, 6, 20);
+      writeUint16(centralView, 8, 0);
+      writeUint16(centralView, 10, 0);
+      writeUint16(centralView, 12, now.time);
+      writeUint16(centralView, 14, now.day);
+      writeUint32(centralView, 16, crc);
+      writeUint32(centralView, 20, data.length);
+      writeUint32(centralView, 24, data.length);
+      writeUint16(centralView, 28, name.length);
+      writeUint16(centralView, 30, 0);
+      writeUint16(centralView, 32, 0);
+      writeUint16(centralView, 34, 0);
+      writeUint16(centralView, 36, 0);
+      writeUint32(centralView, 38, 0);
+      writeUint32(centralView, 42, offset);
+      central.set(name, 46);
+      centralParts.push(central);
+      offset += local.length + data.length;
+    }
+
+    const centralOffset = offset;
+    const central = concatBytes(centralParts);
+    const end = new Uint8Array(22);
+    const endView = new DataView(end.buffer);
+    writeUint32(endView, 0, 0x06054b50);
+    writeUint16(endView, 4, 0);
+    writeUint16(endView, 6, 0);
+    writeUint16(endView, 8, entries.length);
+    writeUint16(endView, 10, entries.length);
+    writeUint32(endView, 12, central.length);
+    writeUint32(endView, 16, centralOffset);
+    writeUint16(endView, 20, 0);
+
+    return new Blob([...localParts, central, end], { type: "application/zip" });
+  }
+
+  async function exportKitArchive() {
+    const service = bridge.device.deviceService;
+    if (!service) {
+      setStatus("connect the device before exporting");
+      return;
+    }
+    const pads = sortedPads().filter((pad) => pad.assignedPath);
+    if (!pads.length) {
+      setStatus("no assigned pads to export");
+      return;
+    }
+
+    ui.busy = true;
+    try {
+      const project = activeName(bridge.device.activeProject) || "unknown";
+      const group = activeName(bridge.device.activeGroup) || "unknown";
+      const manifest = {
+        type: "ep-tools-kit",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        device: bridge.device.deviceService.device
+          ? {
+              name: bridge.device.deviceService.device.name,
+              serial: bridge.device.deviceService.device.serial,
+            }
+          : null,
+        project,
+        group,
+        pads: [],
+      };
+      const entries = [];
+
+      for (let index = 0; index < pads.length; index++) {
+        const pad = pads[index];
+        const padNumber = padLabel(pad.node.name);
+        const name = ui.soundCache.get(pad.assignedPath) || shortPath(pad.assignedPath) || `pad_${padNumber}`;
+        const fileName = `pads/pad_${padNumber}_${safeName(name)}.wav`;
+        setStatus(`exporting pad ${padNumber}`);
+        const wav = await service.downloadSoundAsWav(pad.assignedPath);
+        entries.push({ name: fileName, blob: wav });
+        manifest.pads.push({
+          pad: padNumber,
+          devicePad: pad.node.name,
+          soundId: pad.meta && pad.meta.sym ? pad.meta.sym : null,
+          name,
+          assignedPath: pad.assignedPath,
+          file: fileName,
+        });
+      }
+
+      entries.unshift({
+        name: "kit.json",
+        blob: new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }),
+      });
+      const zip = await createZip(entries);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zip);
+      a.download = `EP_kit_P${safeName(project)}_${safeName(group)}.zip`;
+      document.body.append(a);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      a.remove();
+      setStatus(`exported ${pads.length} pad${pads.length === 1 ? "" : "s"}`);
+      setTimeout(() => setStatus(""), 2500);
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "kit export failed");
+    } finally {
+      ui.busy = false;
+    }
+  }
+
   function renderSelectors() {
     const project = activeName(bridge.device.activeProject);
     const group = activeName(bridge.device.activeGroup);
@@ -400,6 +577,7 @@
         <div id="ep133-kit-pads"></div>
         <div class="ep133-kit-row">
           <button type="button" id="ep133-kit-refresh">refresh</button>
+          <button type="button" id="ep133-kit-export">export kit</button>
           <span id="ep133-kit-status"></span>
         </div>
       </div>
@@ -411,6 +589,7 @@
     ui.drop = byId("ep133-kit-drop");
 
     byId("ep133-kit-refresh").addEventListener("click", refresh);
+    byId("ep133-kit-export").addEventListener("click", exportKitArchive);
     ui.drop.addEventListener("dragover", (event) => {
       event.preventDefault();
       ui.drop.classList.add("drop-target");
