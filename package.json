@@ -9,7 +9,8 @@
     "package": "electron-builder",
     "modern:dev": "vite --config modern/vite.config.ts --host 0.0.0.0",
     "modern:build": "vite build --config modern/vite.config.ts",
-    "modern:preview": "vite preview --config modern/vite.config.ts --host 0.0.0.0"
+    "modern:preview": "vite preview --config modern/vite.config.ts --host 0.0.0.0",
+    "modern:electron": "EP_MODERN_DEV_URL=http://localhost:5173 electron ."
   },
   "build": {
     "appId": "com.ep133.sampletool",

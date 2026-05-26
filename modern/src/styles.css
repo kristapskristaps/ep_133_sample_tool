@@ -20,6 +20,24 @@
   --radius-lg: 0.75rem;
 }
 
+.dark {
+  --color-background: hsl(164 36% 8%);
+  --color-foreground: hsl(42 28% 92%);
+  --color-card: hsl(164 34% 11%);
+  --color-card-foreground: hsl(42 28% 92%);
+  --color-muted: hsl(164 28% 16%);
+  --color-muted-foreground: hsl(42 16% 70%);
+  --color-primary: hsl(11 91% 58%);
+  --color-primary-foreground: hsl(42 28% 98%);
+  --color-secondary: hsl(166 34% 22%);
+  --color-secondary-foreground: hsl(42 28% 94%);
+  --color-destructive: hsl(0 75% 52%);
+  --color-destructive-foreground: hsl(42 28% 98%);
+  --color-border: hsl(164 22% 26%);
+  --color-ring: hsl(11 91% 58%);
+  --color-sidebar: hsl(164 34% 10%);
+}
+
 * {
   border-color: var(--color-border);
 }
@@ -34,4 +52,8 @@ body {
 button,
 input {
   font: inherit;
+}
+
+iframe {
+  color-scheme: light;
 }

@@ -1,6 +1,7 @@
 // Modules to control application life and create native browser window
 const { app, BrowserWindow } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs')
 
 function createWindow () {
   // Create the browser window.
@@ -16,7 +17,14 @@ function createWindow () {
   })
   // and load the index.html of the app.
   //mainWindow.setMenuBarVisibility(false)
-  mainWindow.loadFile('data/index.html')
+  const modernIndex = path.join(__dirname, 'modern', 'dist', 'index.html')
+  if (process.env.EP_MODERN_DEV_URL) {
+    mainWindow.loadURL(process.env.EP_MODERN_DEV_URL)
+  } else if (fs.existsSync(modernIndex)) {
+    mainWindow.loadFile(modernIndex)
+  } else {
+    mainWindow.loadFile('data/index.html')
+  }
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     console.log('Permission request:', permission);
 

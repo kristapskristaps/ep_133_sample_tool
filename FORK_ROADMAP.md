@@ -4,6 +4,21 @@ Fork: https://github.com/kristapskristaps/ep_133_sample_tool
 
 ## Implemented first
 
+### Modern React shell
+
+The fork now includes a modern React/Vite/Tailwind workspace in `modern/`.
+
+The modern shell is the new primary UI direction:
+
+- A utilitarian app frame with persistent left navigation.
+- First-class tabs for `Kit`, `Sample`, `DSP`, `Archive`, and `Device`.
+- Integrated dark mode with persisted theme preference.
+- Shared visual tokens for buttons, panels, pads, tabs, and status surfaces.
+- A production build path through `npm run modern:build`.
+- Electron loads `modern/dist/index.html` when it exists, falling back to the original app if the modern build has not been generated.
+
+The hardware runtime is currently bridged through the original bundled app in the `Device` tab. In development, Vite serves the original `data/` app under `/legacy`; in packaged Electron builds, the iframe points back to `data/index.html`. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules.
+
 ### Feature sidebar
 
 The fork adds a single right-side `EP Tools` sidebar loaded from `data/feature-sidebar.js` and `data/feature-sidebar.css`.
@@ -82,6 +97,13 @@ Current sampler workflow:
 System audio capture depends on the Chromium/WebRTC picker and host OS permissions. On some systems the user must choose a tab/window/screen with audio sharing enabled; on others only microphone capture may be available.
 
 ## Next feature slices
+
+### Device service extraction
+
+- Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
+- Replace the `Device` iframe bridge with native React controls.
+- Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
+- Keep the legacy app as an optional troubleshooting fallback until the native service is feature complete.
 
 ### High-quality pitch and time processing
 
