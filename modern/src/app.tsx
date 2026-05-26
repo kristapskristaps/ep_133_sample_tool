@@ -88,6 +88,7 @@ type EngineState = {
   activeProject: string;
   activeGroup: string;
   uploading: boolean;
+  status: string;
 };
 
 const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
@@ -169,6 +170,7 @@ function snapshotEngine(bridge?: EngineBridge): EngineState {
     activeProject,
     activeGroup,
     uploading: Boolean(bridge?.uploader?.isUploading),
+    status: !bridge ? "Engine loading" : bridge.device?.deviceService ? "Connected" : "No device found",
   };
 }
 
@@ -185,6 +187,7 @@ function useTheme() {
 
 function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
   const [state, setState] = useState<EngineState>(() => snapshotEngine());
+  const [midiStatus, setMidiStatus] = useState("");
 
   const getBridge = useCallback(() => {
     try {
@@ -221,6 +224,23 @@ function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
 
   return {
     ...state,
+    status: state.connected ? state.status : midiStatus || state.status,
+    connect: () =>
+      run(async (bridge) => {
+        const frameWindow = frameRef.current?.contentWindow;
+        if (!frameWindow?.navigator.requestMIDIAccess) {
+          setMidiStatus("Web MIDI is not available in this runtime");
+          return;
+        }
+        setMidiStatus("Requesting MIDI/Sysex access");
+        try {
+          await frameWindow.navigator.requestMIDIAccess({ sysex: true });
+          setMidiStatus("Scanning for EP device");
+          await bridge.device?.refresh?.();
+        } catch {
+          setMidiStatus("MIDI/Sysex permission was denied");
+        }
+      }),
     refresh: () => run((bridge) => bridge.device?.refresh?.()),
     setProject: (project: string) => run((bridge) => bridge.device?.setProject?.(project)),
     setGroup: (group: string) => run((bridge) => bridge.device?.setGroup?.(group)),
@@ -249,9 +269,10 @@ function DeviceEngineHost({ frameRef }: { frameRef: RefObject<HTMLIFrameElement 
       ref={frameRef}
       title="EP-133 internal device engine"
       src={engineUrl()}
+      allow="midi; midi-sysex"
       aria-hidden="true"
       tabIndex={-1}
-      className="pointer-events-none fixed -bottom-4 -right-4 h-px w-px opacity-0"
+      className="pointer-events-none fixed -bottom-[900px] -right-[1300px] h-[800px] w-[1200px] opacity-0"
     />
   );
 }
@@ -628,7 +649,7 @@ export function App() {
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               {dark ? "Light" : "Dark"}
             </Button>
-            <Button variant="outline" onClick={engine.refresh}>
+            <Button variant="outline" onClick={engine.connected ? engine.refresh : engine.connect}>
               <Usb className="h-4 w-4" /> {engine.connected ? "Refresh" : "Connect"}
             </Button>
           </div>
@@ -638,7 +659,7 @@ export function App() {
             <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
             <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
             <Stat label="Memory" value={engine.memory} icon={Gauge} />
-            <Stat label="Pads used" value={`${usedPads}/12`} icon={AudioLines} />
+            <Stat label="Status" value={engine.status} icon={AudioLines} />
           </div>
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="flex w-full justify-start overflow-x-auto">

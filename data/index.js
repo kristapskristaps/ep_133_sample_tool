@@ -29204,7 +29204,8 @@ function DeviceProvider({
           const rt =
             ((nt = st.metadata) == null ? void 0 : nt.base_sku) || st.sku;
           (s.length > 0 && !s.includes(rt)) ||
-            (console.log(JSON.stringify(st.metadata)),
+            (j(null),
+            console.log(JSON.stringify(st.metadata)),
             et((tt) => [...tt, st]),
             b(!1));
         },
@@ -29227,7 +29228,7 @@ function DeviceProvider({
           }
         },
         onMidiInited: () => {
-          b(!0);
+          j(null), b(!0);
         },
       }),
         it(ot);
