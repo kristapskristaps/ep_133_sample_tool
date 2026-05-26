@@ -13,19 +13,16 @@ import {
   Moon,
   Music2,
   RotateCcw,
-  Save,
   Scissors,
   Search,
   SlidersHorizontal,
   Sun,
   Upload,
   Usb,
-  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 type Pad = {
@@ -96,6 +93,19 @@ type EngineState = {
   status: string;
 };
 
+type SampleSettings = {
+  normalize: boolean;
+  trim: boolean;
+  mono: boolean;
+  reverse: boolean;
+  pingPong: boolean;
+  lowCut: boolean;
+  highCut: boolean;
+  targetDb: string;
+  sourceBpm: string;
+  targetBpm: string;
+};
+
 const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
   number: String(index + 1).padStart(2, "0"),
   name: "",
@@ -104,12 +114,39 @@ const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
 
 const projects = ["01", "02", "03", "04", "05", "06", "07", "08", "09"];
 const groups = ["A", "B", "C", "D"];
-const nav = [
-  [LayoutDashboard, "Workspace", "kit"],
-  [AudioWaveform, "Sampler", "sample"],
-  [SlidersHorizontal, "DSP", "dsp"],
-  [Archive, "Archive", "archive"],
-] as const;
+
+const defaultSettings: SampleSettings = {
+  normalize: true,
+  trim: true,
+  mono: false,
+  reverse: false,
+  pingPong: false,
+  lowCut: false,
+  highCut: false,
+  targetDb: "-0.3",
+  sourceBpm: "",
+  targetBpm: "",
+};
+
+function syncOfflineDspSettings(settings: SampleSettings) {
+  const payload = {
+    enabled: true,
+    normalize: settings.normalize,
+    reverseCopy: settings.reverse,
+    pingPongCopy: settings.pingPong,
+    normalizeTargetDb: Number(settings.targetDb) || -0.3,
+    trimSilence: settings.trim,
+    mono: settings.mono,
+    lowCutHz: settings.lowCut ? 35 : "",
+    highCutHz: settings.highCut ? 16000 : "",
+    sourceBpm: settings.sourceBpm,
+    targetBpm: settings.targetBpm,
+  };
+  const current = window.ep133OfflineDsp?.settings || {};
+  const next = { ...current, ...payload };
+  if (window.ep133OfflineDsp) window.ep133OfflineDsp.settings = next;
+  localStorage.setItem("ep133.offlineDsp", JSON.stringify(next));
+}
 
 function engineAsset(path: string) {
   return import.meta.env.DEV ? `/legacy/${path}` : `../../data/${path}`;
@@ -216,14 +253,10 @@ function useDeviceEngine() {
   const [midiStatus, setMidiStatus] = useState("");
   const autoConnectAttempted = useRef(false);
 
-  const getBridge = useCallback(() => {
-    return window.ep133KitBridge as EngineBridge | undefined;
-  }, []);
+  const getBridge = useCallback(() => window.ep133KitBridge as EngineBridge | undefined, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setState(snapshotEngine(getBridge()));
-    }, 500);
+    const timer = window.setInterval(() => setState(snapshotEngine(getBridge())), 500);
     return () => window.clearInterval(timer);
   }, [getBridge]);
 
@@ -245,34 +278,13 @@ function useDeviceEngine() {
     [getBridge],
   );
 
-  useEffect(() => {
-    if (autoConnectAttempted.current || !state.ready || state.connected) return;
-    autoConnectAttempted.current = true;
-    void run(async (bridge) => {
-      if (!navigator.requestMIDIAccess) {
-        setMidiStatus("Web MIDI is not available in this runtime");
-        return;
-      }
-      try {
-        const access = await navigator.requestMIDIAccess({ sysex: true });
-        setMidiStatus(midiPortSummary(access));
-        bridge.device?.requestMidi?.();
-      } catch {
-        setMidiStatus("Click Connect to allow MIDI/Sysex");
-      }
-    });
-  }, [run, state.connected, state.ready]);
-
-  return {
-    ...state,
-    status: state.connected ? state.status : midiStatus || state.status,
-    connect: () =>
+  const requestMidi = useCallback(
+    () =>
       run(async (bridge) => {
         if (!navigator.requestMIDIAccess) {
           setMidiStatus("Web MIDI is not available in this runtime");
           return;
         }
-        setMidiStatus("Requesting MIDI/Sysex access");
         try {
           const access = await navigator.requestMIDIAccess({ sysex: true });
           setMidiStatus(midiPortSummary(access));
@@ -280,9 +292,22 @@ function useDeviceEngine() {
           window.setTimeout(() => bridge.device?.requestMidi?.(), 1200);
           window.setTimeout(() => setState(snapshotEngine(bridge)), 2200);
         } catch {
-          setMidiStatus("MIDI/Sysex permission was denied");
+          setMidiStatus("Click Connect to allow MIDI/Sysex");
         }
       }),
+    [run],
+  );
+
+  useEffect(() => {
+    if (autoConnectAttempted.current || !state.ready || state.connected) return;
+    autoConnectAttempted.current = true;
+    void requestMidi();
+  }, [requestMidi, state.connected, state.ready]);
+
+  return {
+    ...state,
+    status: state.connected ? state.status : midiStatus || state.status,
+    connect: requestMidi,
     refresh: () => run((bridge) => bridge.device?.refresh?.()),
     setProject: (project: string) => run((bridge) => bridge.device?.setProject?.(project)),
     setGroup: (group: string) => run((bridge) => bridge.device?.setGroup?.(group)),
@@ -335,9 +360,7 @@ function DeviceEngineHost() {
       await loadScript("kit-inspector.js");
       await loadScript("sampler.js");
       await loadScript("index.js", "module");
-    })().catch((error) => {
-      console.error(error);
-    });
+    })().catch((error) => console.error(error));
   }, []);
 
   return null;
@@ -350,9 +373,9 @@ function Stat({ label, value, icon: Icon }: { label: string; value: string; icon
         <div className="rounded-md bg-primary/10 p-2 text-primary">
           <Icon className="h-4 w-4" />
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-          <div className="text-lg font-semibold">{value}</div>
+          <div className="truncate text-lg font-semibold">{value}</div>
         </div>
       </CardContent>
     </Card>
@@ -370,6 +393,76 @@ function SectionTitle({ icon: Icon, title, description }: { icon: typeof Gauge; 
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
     </div>
+  );
+}
+
+function SettingRow({
+  label,
+  detail,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  detail: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border bg-background p-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs text-muted-foreground">{detail}</div>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
+function SampleSettingsPanel({
+  settings,
+  setSettings,
+}: {
+  settings: SampleSettings;
+  setSettings: (settings: SampleSettings) => void;
+}) {
+  const update = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
+    setSettings({ ...settings, [key]: value });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <SectionTitle icon={SlidersHorizontal} title="Sample Settings" description="Applied before sending samples to the selected pad or kit." />
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <SettingRow label="Normalize" detail={`Peak target ${settings.targetDb} dBFS`} checked={settings.normalize} onCheckedChange={(checked) => update("normalize", checked)} />
+        <SettingRow label="Trim silence" detail="Remove quiet heads and tails" checked={settings.trim} onCheckedChange={(checked) => update("trim", checked)} />
+        <SettingRow label="Mono mix" detail="Collapse stereo files for tight kits" checked={settings.mono} onCheckedChange={(checked) => update("mono", checked)} />
+        <SettingRow label="Reverse copy" detail="Create a reversed variant next to source" checked={settings.reverse} onCheckedChange={(checked) => update("reverse", checked)} />
+        <SettingRow label="Ping-pong copy" detail="Render forward and reverse playback" checked={settings.pingPong} onCheckedChange={(checked) => update("pingPong", checked)} />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Target dBFS
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetDb} onChange={(event) => update("targetDb", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Source BPM
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.sourceBpm} onChange={(event) => update("sourceBpm", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Target BPM
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetBpm} onChange={(event) => update("targetBpm", event.target.value)} />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant={settings.lowCut ? "default" : "outline"} onClick={() => update("lowCut", !settings.lowCut)}>Low cut</Button>
+            <Button variant={settings.highCut ? "default" : "outline"} onClick={() => update("highCut", !settings.highCut)}>High cut</Button>
+          </div>
+        </div>
+        <Button variant="outline" className="justify-start" onClick={() => setSettings(defaultSettings)}>
+          <RotateCcw className="h-4 w-4" /> Reset settings
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -419,113 +512,97 @@ function PadGrid({
   );
 }
 
-function DspPanel() {
-  const rows = [
-    ["Normalize", "Peak target -0.3 dBFS", true],
-    ["Trim silence", "Threshold -55 dBFS", true],
-    ["Mono mix", "Collapse stereo files", false],
-    ["Low cut", "Remove sub rumble at 35 Hz", false],
-    ["High cut", "Soften above 16 kHz", false],
-    ["Reverse copy", "Create pad-ready variants", false],
-    ["Ping-pong copy", "Forward and reverse render", false],
-  ] as const;
+function SampleModal({
+  open,
+  pad,
+  onClose,
+  onUpload,
+}: {
+  open: boolean;
+  pad?: Pad;
+  onClose: () => void;
+  onUpload: (files: File[]) => void;
+}) {
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  if (!open) return null;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-      <Card>
-        <CardHeader>
-          <SectionTitle icon={SlidersHorizontal} title="Offline DSP" description="Batch process files before they touch the device." />
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {rows.map(([label, detail, checked]) => (
-            <div key={label} className="flex items-center justify-between rounded-md border bg-background p-3">
-              <div>
-                <div className="text-sm font-medium">{label}</div>
-                <div className="text-xs text-muted-foreground">{detail}</div>
-              </div>
-              <Switch defaultChecked={checked} />
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4">
+      <div className="w-full max-w-4xl overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b p-4">
+          <SectionTitle icon={AudioWaveform} title={`Sample Pad ${pad?.number || "--"}`} description="Capture, load, chop, and assign without leaving the workspace." />
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-[1fr_260px]">
+          <div className="grid gap-4">
+            <div className="flex flex-wrap gap-2">
+              <Button><Mic2 className="h-4 w-4" /> Record</Button>
+              <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
+              <Button variant="outline"><Scissors className="h-4 w-4" /> Detect chops</Button>
+              <Button><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                multiple
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  event.currentTarget.value = "";
+                  if (files.length) onUpload(files);
+                }}
+              />
             </div>
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Transfer Preset</CardTitle>
-          <CardDescription>Designed for EP dynamic range and fast kit work.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <Button className="justify-start"><Wand2 className="h-4 w-4" /> Apply to next drop</Button>
-          <Button variant="outline" className="justify-start"><Save className="h-4 w-4" /> Save preset</Button>
-          <Button variant="outline" className="justify-start"><RotateCcw className="h-4 w-4" /> Reset</Button>
-          <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Transfer-time DSP is preserved through the internal device engine while its processors are moved into React modules.
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function SamplePanel({ selectedPad, assignFiles }: { selectedPad: string; assignFiles: (files: File[]) => void }) {
-  const markers = [18, 39, 62, 81];
-  return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-      <Card>
-        <CardHeader>
-          <SectionTitle icon={AudioWaveform} title="Sampler" description="Capture audio, mark chops, and assign slices to pads." />
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="flex flex-wrap gap-2">
-            <Button><Mic2 className="h-4 w-4" /> Record</Button>
-            <Button variant="outline"><FolderInput className="h-4 w-4" /> Load file</Button>
-            <Button variant="outline"><Scissors className="h-4 w-4" /> Detect chops</Button>
-            <Button variant="secondary" onClick={() => assignFiles([])}><Upload className="h-4 w-4" /> Assign to pads</Button>
-          </div>
-          <div className="relative h-64 overflow-hidden rounded-lg border bg-zinc-950">
-            <div className="absolute inset-x-6 top-1/2 h-px bg-emerald-400/30" />
-            <div className="absolute inset-6 flex items-center gap-1">
-              {Array.from({ length: 108 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="w-1 rounded-full bg-emerald-400"
-                  style={{ height: `${18 + Math.abs(Math.sin(index * 0.37)) * 110}px`, opacity: index % 9 === 0 ? 1 : 0.65 }}
-                />
+            <div className="relative h-72 overflow-hidden rounded-lg border bg-zinc-950">
+              <div className="absolute inset-x-6 top-1/2 h-px bg-emerald-400/30" />
+              <div className="absolute inset-6 flex items-center gap-1">
+                {Array.from({ length: 120 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="w-1 rounded-full bg-emerald-400"
+                    style={{ height: `${18 + Math.abs(Math.sin(index * 0.37)) * 120}px`, opacity: index % 9 === 0 ? 1 : 0.65 }}
+                  />
+                ))}
+              </div>
+              {[18, 39, 62, 81].map((left, index) => (
+                <div key={left} className="absolute top-4 h-64 w-px bg-primary" style={{ left: `${left}%` }}>
+                  <span className="absolute -left-2 -top-3 rounded bg-primary px-1 text-[10px] text-primary-foreground">{index + 1}</span>
+                </div>
               ))}
             </div>
-            {markers.map((left, index) => (
-              <div key={left} className="absolute top-4 h-56 w-px bg-primary" style={{ left: `${left}%` }}>
-                <span className="absolute -left-2 -top-3 rounded bg-primary px-1 text-[10px] text-primary-foreground">{index + 1}</span>
-              </div>
-            ))}
           </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Chop Actions</CardTitle>
-          <CardDescription>Prepare slices before upload.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 4 equal chops</Button>
-          <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 8 equal chops</Button>
-          <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 12 equal chops</Button>
-          <Button className="justify-start"><Upload className="h-4 w-4" /> Assign from pad {Number(selectedPad)}</Button>
-        </CardContent>
-      </Card>
+          <div className="grid content-start gap-3">
+            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 4 equal chops</Button>
+            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 8 equal chops</Button>
+            <Button variant="outline" className="justify-start"><Scissors className="h-4 w-4" /> 12 equal chops</Button>
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Chops are staged for the selected project/group target. The upload action assigns the rendered files starting at pad {Number(pad?.number || 1)}.
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function KitPanel({
+function Workspace({
   engine,
   selectedPad,
   setSelectedPad,
+  settings,
+  setSettings,
+  onOpenSampler,
 }: {
   engine: ReturnType<typeof useDeviceEngine>;
   selectedPad: string;
   setSelectedPad: (pad: string) => void;
+  settings: SampleSettings;
+  setSettings: (settings: SampleSettings) => void;
+  onOpenSampler: () => void;
 }) {
-  const fileInput = useRef<HTMLInputElement | null>(null);
+  const kitImportInput = useRef<HTMLInputElement | null>(null);
+  const sampleInput = useRef<HTMLInputElement | null>(null);
+  const [archiveNote, setArchiveNote] = useState("");
   const selected = engine.pads.find((pad) => pad.number === selectedPad);
 
   const uploadFiles = useCallback(
@@ -537,14 +614,14 @@ function KitPanel({
   );
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <SectionTitle icon={LayoutDashboard} title="Kit Builder" description="Inspect assignments, drop kits, import, and archive." />
-            <div className="flex gap-2">
+            <SectionTitle icon={LayoutDashboard} title="Project Kit" description="Select a target, choose a pad, then sample, upload, edit, import, or export." />
+            <div className="flex flex-wrap gap-2">
               <input
-                ref={fileInput}
+                ref={kitImportInput}
                 type="file"
                 accept=".zip,application/zip"
                 className="hidden"
@@ -554,8 +631,14 @@ function KitPanel({
                   if (file) engine.importKit(file);
                 }}
               />
-              <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!engine.connected}>
+              <Button variant="outline" onClick={() => kitImportInput.current?.click()} disabled={!engine.connected}>
                 <Archive className="h-4 w-4" /> Import
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setArchiveNote(`${engine.target}: ${engine.pads.filter((pad) => pad.assignedPath).length} assigned pad${engine.pads.filter((pad) => pad.assignedPath).length === 1 ? "" : "s"}`)}
+              >
+                <Search className="h-4 w-4" /> Inspect
               </Button>
               <Button onClick={engine.exportKit} disabled={!engine.connected}>
                 <Download className="h-4 w-4" /> Export
@@ -570,99 +653,85 @@ function KitPanel({
             onSelectPad={setSelectedPad}
             onDropPad={(pad, files) => uploadFiles(files, [pad])}
           />
+          {archiveNote && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              {archiveNote}
+            </div>
+          )}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Active Target</CardTitle>
-          <CardDescription>Choose where uploads and imports land.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div>
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Project</div>
+
+      <div className="grid content-start gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Target</CardTitle>
+            <CardDescription>Uploads and imports land here.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Project</div>
+              <div className="grid grid-cols-3 gap-2">
+                {projects.map((project) => (
+                  <Button key={project} variant={project === engine.activeProject ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setProject(project)}>
+                    {project}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Group</div>
+              <div className="grid grid-cols-4 gap-2">
+                {groups.map((group) => (
+                  <Button key={group} variant={group === engine.activeGroup ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setGroup(group)}>
+                    {group}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Pad {selected?.number || "--"}</CardTitle>
+            <CardDescription>{selected?.name || "empty"} {selected?.assignedPath ? `- ${selected.type}` : ""}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <input
+              ref={sampleInput}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.currentTarget.value = "";
+                if (selected && files.length) uploadFiles(files, [selected]);
+              }}
+            />
+            <Button onClick={onOpenSampler} className="justify-start"><Mic2 className="h-4 w-4" /> Sample or chop</Button>
+            <Button variant="outline" onClick={() => sampleInput.current?.click()} className="justify-start"><Upload className="h-4 w-4" /> Upload sample</Button>
             <div className="grid grid-cols-3 gap-2">
-              {projects.map((project) => (
-                <Button key={project} variant={project === engine.activeProject ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setProject(project)}>
-                  {project}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Group</div>
-            <div className="grid grid-cols-4 gap-2">
-              {groups.map((group) => (
-                <Button key={group} variant={group === engine.activeGroup ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setGroup(group)}>
-                  {group}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-muted/40 p-3">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Selected pad</div>
-            <div className="mt-1 text-sm font-medium">Pad {selected?.number}: {selected?.name || "empty"}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{selected?.type}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => engine.playPad(selected)} disabled={!selected?.assignedPath}>Play</Button>
               <Button size="sm" variant="outline" onClick={() => engine.downloadPad(selected)} disabled={!selected?.assignedPath}>WAV</Button>
               <Button size="sm" variant="outline" onClick={() => engine.clearPad(selected)} disabled={!selected?.assignedPath}>Clear</Button>
             </div>
-          </div>
-          <div
-            className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              uploadFiles(Array.from(event.dataTransfer.files || []));
-            }}
-          >
-            Drop a folder of 12 sounds to auto-map a kit.
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function ArchivePanel({ engine }: { engine: ReturnType<typeof useDeviceEngine> }) {
-  const fileInput = useRef<HTMLInputElement | null>(null);
-  return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <SectionTitle icon={Archive} title="Kit Archives" description="Export and restore kits as portable ZIP files." />
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.currentTarget.value = "";
-              if (file) engine.importKit(file);
-            }}
-          />
-          <Button onClick={engine.exportKit} disabled={!engine.connected}><Download className="h-4 w-4" /> Export active kit</Button>
-          <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!engine.connected}><Archive className="h-4 w-4" /> Import kit archive</Button>
-          <Button variant="outline"><Search className="h-4 w-4" /> Inspect manifest</Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Archives</CardTitle>
-          <CardDescription>Local history view for the next iteration.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2">
-          {["EP_kit_P03_D.zip", "EP_kit_P01_A.zip", "EP_kit_P08_C.zip"].map((name) => (
-            <div key={name} className="flex items-center justify-between rounded-md border bg-background p-3">
-              <span className="text-sm">{name}</span>
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <div
+              className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (selected) uploadFiles(Array.from(event.dataTransfer.files || []), [selected]);
+              }}
+            >
+              Drop audio here for this pad.
             </div>
-          ))}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <SampleSettingsPanel settings={settings} setSettings={setSettings} />
+      </div>
     </div>
   );
 }
@@ -670,9 +739,15 @@ function ArchivePanel({ engine }: { engine: ReturnType<typeof useDeviceEngine> }
 export function App() {
   const { dark, setDark } = useTheme();
   const engine = useDeviceEngine();
-  const [tab, setTab] = useState("kit");
   const [selectedPad, setSelectedPad] = useState("01");
+  const [settings, setSettings] = useState<SampleSettings>(defaultSettings);
+  const [samplerOpen, setSamplerOpen] = useState(false);
   const usedPads = useMemo(() => engine.pads.filter((pad) => pad.name).length, [engine.pads]);
+  const selected = engine.pads.find((pad) => pad.number === selectedPad);
+
+  useEffect(() => {
+    syncOfflineDspSettings(settings);
+  }, [settings]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -684,30 +759,21 @@ export function App() {
           </div>
           <div>
             <div className="font-semibold">EP Tools</div>
-            <div className="text-xs text-muted-foreground">Modern sample workspace</div>
+            <div className="text-xs text-muted-foreground">Project kit workspace</div>
           </div>
         </div>
         <nav className="grid gap-1 p-3">
-          {nav.map(([Icon, label, value]) => (
-            <button
-              key={value}
-              onClick={() => setTab(value)}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
-                tab === value && "bg-muted text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
+          <button className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm text-foreground">
+            <LayoutDashboard className="h-4 w-4" />
+            Workspace
+          </button>
         </nav>
       </aside>
       <main className="lg:pl-64">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-6 backdrop-blur">
           <div>
             <h1 className="text-lg font-semibold">EP-133 Sample Workspace</h1>
-            <p className="text-sm text-muted-foreground">Fast kit building, capture, chops, archives, and transfer prep.</p>
+            <p className="text-sm text-muted-foreground">Select a project, group, and pad. Then sample, process, upload, import, or export.</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setDark(!dark)}>
@@ -724,22 +790,31 @@ export function App() {
             <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
             <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
             <Stat label="Memory" value={engine.memory} icon={Gauge} />
-            <Stat label="Status" value={engine.status} icon={AudioLines} />
+            <Stat label="Pads used" value={`${usedPads}/12`} icon={AudioLines} />
           </div>
-          <Tabs value={tab} onValueChange={setTab}>
-            <TabsList className="flex w-full justify-start overflow-x-auto">
-              <TabsTrigger value="kit">Kit</TabsTrigger>
-              <TabsTrigger value="sample">Sample</TabsTrigger>
-              <TabsTrigger value="dsp">DSP</TabsTrigger>
-              <TabsTrigger value="archive">Archive</TabsTrigger>
-            </TabsList>
-            <TabsContent value="kit"><KitPanel engine={engine} selectedPad={selectedPad} setSelectedPad={setSelectedPad} /></TabsContent>
-            <TabsContent value="sample"><SamplePanel selectedPad={selectedPad} assignFiles={(files) => engine.uploadToPads(files, engine.pads.slice(Number(selectedPad) - 1))} /></TabsContent>
-            <TabsContent value="dsp"><DspPanel /></TabsContent>
-            <TabsContent value="archive"><ArchivePanel engine={engine} /></TabsContent>
-          </Tabs>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/35 px-4 py-3 text-sm">
+            <span className="text-muted-foreground">Status</span>
+            <span className="font-medium">{engine.status}</span>
+          </div>
+          <Workspace
+            engine={engine}
+            selectedPad={selectedPad}
+            setSelectedPad={setSelectedPad}
+            settings={settings}
+            setSettings={setSettings}
+            onOpenSampler={() => setSamplerOpen(true)}
+          />
         </div>
       </main>
+      <SampleModal
+        open={samplerOpen}
+        pad={selected}
+        onClose={() => setSamplerOpen(false)}
+        onUpload={(files) => {
+          if (selected) void engine.uploadToPads(files, [selected]);
+          setSamplerOpen(false);
+        }}
+      />
     </div>
   );
 }

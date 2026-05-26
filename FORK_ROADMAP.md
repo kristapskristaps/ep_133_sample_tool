@@ -11,17 +11,26 @@ The fork now includes a modern React/Vite/Tailwind workspace in `modern/`.
 The modern shell is the new primary UI direction:
 
 - A utilitarian app frame with persistent left navigation.
-- First-class tabs for `Kit`, `Sample`, `DSP`, `Archive`, and `Device`.
+- A single pad-centric workspace for project/group selection, pad assignment, sample settings, sampling/chopping, and kit import/export.
 - Integrated dark mode with persisted theme preference.
 - Shared visual tokens for buttons, panels, pads, tabs, and status surfaces.
 - A production build path through `npm run modern:build`.
 - Electron loads `modern/dist/index.html` when it exists, falling back to the original app if the modern build has not been generated.
 
-The hardware runtime is currently bridged through a hidden internal engine document at `data/engine.html`. In development, Vite serves it under `/legacy/engine.html`; in packaged Electron builds, the hidden iframe points back to `data/engine.html`. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules. The original app is no longer presented as a user-facing tab or panel in the modern UI.
+The hardware runtime is currently bridged through the original TE bundle mounted into a hidden same-window root. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules. The original app is no longer presented as a user-facing tab or panel in the modern UI.
 
-### Feature sidebar
+Current workspace flow:
 
-The fork adds a single right-side `EP Tools` sidebar loaded from `data/feature-sidebar.js` and `data/feature-sidebar.css`.
+- Select the active project and group.
+- Click a pad to inspect and act on it.
+- Upload audio directly to the selected pad or drop audio onto the pad.
+- Open a sampling/chopping modal from the selected pad.
+- Apply transfer DSP from the same workspace through `Sample Settings`.
+- Import, export, and inspect the active kit from the main view.
+
+### Legacy feature sidebar
+
+The earlier fork work added a right-side `EP Tools` sidebar loaded from `data/feature-sidebar.js` and `data/feature-sidebar.css`.
 
 The sidebar owns the visual shell and tab navigation for the added tools:
 
@@ -33,7 +42,7 @@ Feature modules register their content into this sidebar instead of creating sep
 
 ### Offline DSP on transfer
 
-The fork adds browser-side DSP controls in the `DSP` sidebar tab.
+The fork adds browser-side DSP controls that are now surfaced in the modern workspace as `Sample Settings`.
 
 Current transfer-time processing:
 
@@ -62,7 +71,7 @@ Still missing for a full DSP workstation:
 
 ### Kit inspector and quick kit upload
 
-The fork adds a kit inspector in the `Kit` sidebar tab.
+The fork adds a kit inspector that is now represented by the main modern workspace.
 
 Current kit workflow:
 
@@ -80,7 +89,7 @@ The inspector uses a small bridge inserted into the bundled app so it can call t
 
 ### Sampler mode
 
-The fork adds sampler mode in the `Sample` sidebar tab.
+The fork adds sampler mode, now opened as a selected-pad modal from the workspace.
 
 Current sampler workflow:
 
@@ -101,7 +110,7 @@ System audio capture depends on the Chromium/WebRTC picker and host OS permissio
 ### Device service extraction
 
 - Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
-- Replace the hidden compatibility iframe with native React device-service modules.
+- Replace the hidden compatibility engine with native React device-service modules.
 - Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
 - Keep the legacy app as an optional troubleshooting fallback until the native service is feature complete.
 
