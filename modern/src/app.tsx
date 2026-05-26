@@ -63,6 +63,7 @@ type EngineBridge = {
     deviceError?: string;
     deviceCount?: number;
     engineLocked?: boolean;
+    requestMidi?: () => void;
     refresh?: () => Promise<void>;
     setProject?: (project: string) => Promise<void>;
     setGroup?: (group: string) => Promise<void>;
@@ -261,7 +262,9 @@ function useDeviceEngine(frameRef: RefObject<HTMLIFrameElement | null>) {
         try {
           const access = await frameWindow.navigator.requestMIDIAccess({ sysex: true });
           setMidiStatus(midiPortSummary(access));
-          await bridge.device?.refresh?.();
+          bridge.device?.requestMidi?.();
+          window.setTimeout(() => bridge.device?.requestMidi?.(), 1200);
+          window.setTimeout(() => setState(snapshotEngine(bridge)), 2200);
         } catch {
           setMidiStatus("MIDI/Sysex permission was denied");
         }

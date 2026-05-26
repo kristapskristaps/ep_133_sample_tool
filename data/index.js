@@ -29197,6 +29197,11 @@ function DeviceProvider({
   return (
     reactExports.useEffect(() => {
       const ot = new SysExFileHandler(a, c, _);
+      var st;
+      (st = window.ep133KitBridge) == null ||
+        st.setDeviceState({
+          requestMidi: () => a.requestMidi(),
+        });
       a.init({
         debug: o,
         onDeviceFound: (st) => {
