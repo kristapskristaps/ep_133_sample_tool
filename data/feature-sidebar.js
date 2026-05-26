@@ -1,6 +1,16 @@
 (function () {
   "use strict";
 
+  const engineOnly = new URLSearchParams(window.location.search).has("ep-modern-engine");
+  if (engineOnly) {
+    window.ep133Features = {
+      register() {},
+      activate() {},
+    };
+    document.documentElement.dataset.ep133EngineOnly = "true";
+    return;
+  }
+
   const state = {
     ready: false,
     active: localStorage.getItem("ep133.features.active") || "dsp",

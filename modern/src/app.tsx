@@ -14,12 +14,10 @@ import {
   Mic2,
   Moon,
   Music2,
-  Play,
   RotateCcw,
   Save,
   Scissors,
   Search,
-  Settings2,
   SlidersHorizontal,
   Sun,
   Upload,
@@ -61,7 +59,6 @@ const nav = [
   [AudioWaveform, "Sampler", "sample"],
   [SlidersHorizontal, "DSP", "dsp"],
   [Archive, "Archive", "archive"],
-  [HardDrive, "Device Engine", "device"],
 ] as const;
 
 function useTheme() {
@@ -318,19 +315,22 @@ function ArchivePanel() {
   );
 }
 
-function DevicePanel() {
-  const legacyUrl = import.meta.env.DEV ? "/legacy/index.html" : "../../data/index.html";
+function DevicePanel({ onClose }: { onClose: () => void }) {
+  const legacyUrl = import.meta.env.DEV ? "/legacy/index.html?ep-modern-engine=1" : "../../data/index.html?ep-modern-engine=1";
 
   return (
     <Card className="overflow-hidden">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <SectionTitle icon={HardDrive} title="Device Engine" description="The existing TE runtime is embedded here while MIDI/Sysex services are migrated." />
-          <Button variant="outline" asChild>
-            <a href={legacyUrl} target="_blank" rel="noreferrer">
-              <Cable className="h-4 w-4" /> Open legacy
-            </a>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" asChild>
+              <a href={legacyUrl} target="_blank" rel="noreferrer">
+                <Cable className="h-4 w-4" /> Open engine
+              </a>
+            </Button>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -347,6 +347,7 @@ function DevicePanel() {
 export function App() {
   const { dark, setDark } = useTheme();
   const [tab, setTab] = useState("kit");
+  const [engineOpen, setEngineOpen] = useState(false);
   const [selectedPad, setSelectedPad] = useState("01");
   const usedPads = useMemo(() => initialPads.filter((pad) => pad.name).length, []);
 
@@ -389,7 +390,7 @@ export function App() {
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               {dark ? "Light" : "Dark"}
             </Button>
-            <Button variant="outline" onClick={() => setTab("device")}><Cable className="h-4 w-4" /> Device engine</Button>
+            <Button variant="outline" onClick={() => setEngineOpen((open) => !open)}><Cable className="h-4 w-4" /> Engine</Button>
             <Button><Usb className="h-4 w-4" /> Connect</Button>
           </div>
         </header>
@@ -406,14 +407,13 @@ export function App() {
               <TabsTrigger value="sample">Sample</TabsTrigger>
               <TabsTrigger value="dsp">DSP</TabsTrigger>
               <TabsTrigger value="archive">Archive</TabsTrigger>
-              <TabsTrigger value="device">Device</TabsTrigger>
             </TabsList>
             <TabsContent value="kit"><KitPanel pads={initialPads} selectedPad={selectedPad} setSelectedPad={setSelectedPad} /></TabsContent>
             <TabsContent value="sample"><SamplePanel /></TabsContent>
             <TabsContent value="dsp"><DspPanel /></TabsContent>
             <TabsContent value="archive"><ArchivePanel /></TabsContent>
-            <TabsContent value="device"><DevicePanel /></TabsContent>
           </Tabs>
+          {engineOpen && <DevicePanel onClose={() => setEngineOpen(false)} />}
         </div>
       </main>
     </div>
