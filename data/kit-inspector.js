@@ -388,10 +388,11 @@
   function buildPanel() {
     const panel = document.createElement("section");
     panel.id = "ep133-kit-inspector";
+    panel.className = "ep133-utility-drawer collapsed";
     panel.innerHTML = `
       <header>
-        <span>Kit Inspector</span>
-        <button type="button" id="ep133-kit-toggle">hide</button>
+        <span>Kit</span>
+        <button type="button" id="ep133-kit-toggle">open</button>
       </header>
       <div id="ep133-kit-body">
         <div class="ep133-kit-row" id="ep133-kit-projects"></div>
@@ -413,7 +414,8 @@
 
     byId("ep133-kit-toggle").addEventListener("click", () => {
       panel.classList.toggle("collapsed");
-      byId("ep133-kit-toggle").textContent = panel.classList.contains("collapsed") ? "show" : "hide";
+      panel.classList.toggle("open", !panel.classList.contains("collapsed"));
+      byId("ep133-kit-toggle").textContent = panel.classList.contains("collapsed") ? "open" : "close";
     });
     byId("ep133-kit-refresh").addEventListener("click", refresh);
     ui.drop.addEventListener("dragover", (event) => {

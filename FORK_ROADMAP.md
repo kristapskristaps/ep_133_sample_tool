@@ -11,13 +11,27 @@ The fork adds a browser-side `Offline DSP` panel loaded from `data/dsp.js` and `
 Current transfer-time processing:
 
 - Peak normalize dropped audio before upload.
+- Set the normalize target in dBFS.
+- Trim leading and trailing silence with an adjustable threshold.
+- Add fade-in and fade-out ramps.
+- Mix stereo/multichannel files down to mono.
+- Resample output to a target sample rate, defaulting to the EP device rate.
+- Apply simple low-cut and high-cut filters.
 - Apply a gain trim after normalization.
 - Generate optional reversed copies next to the original file.
 - Generate optional ping-pong copies.
 - Conform loops from a source BPM to a target BPM with Web Audio resampling.
 - Prefix obvious filenames with kit tags like `kick_`, `snare_`, `cymb_`, `perc_`, `bass_`, `loop_`, and `sfx_`.
 
-The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. This keeps the minified upstream bundle untouched.
+The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. This keeps most of the upstream bundle untouched; a small bridge is patched into the bundle for kit/device integration.
+
+Still missing for a full DSP workstation:
+
+- Rubber Band or similar high-quality time-stretch that preserves pitch.
+- Dedicated pitch-shift in semitones/cents.
+- Multi-band EQ and dynamics instead of the current simple filters and gain stage.
+- Waveform preview with before/after audition.
+- Batch presets and per-folder processing profiles.
 
 ### Kit inspector and quick kit upload
 
