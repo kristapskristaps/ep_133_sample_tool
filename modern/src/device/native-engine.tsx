@@ -22,6 +22,20 @@ function soundIdFromName(name: string) {
   return match ? Number(match[1]) : 0;
 }
 
+function cleanSoundName(name: string) {
+  return name.replace(/^\d{1,3}\s*/, "").replace(/\.pcm$/i, "").trim();
+}
+
+function metadataString(meta: Record<string, unknown> | undefined, key: string) {
+  const value = meta?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function metadataNumber(meta: Record<string, unknown> | undefined, key: string) {
+  const value = Number(meta?.[key]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function formatBytes(value?: number) {
   if (!Number.isFinite(value)) return "waiting";
   const units = ["B", "KB", "MB", "GB"];
@@ -78,7 +92,7 @@ export function useDeviceEngine(): DeviceEngine {
       service.getActiveProject(),
       service.getActiveGroup(),
       service.getActivePads(),
-      service.listSounds(),
+      service.listSoundsWithMetadata(),
     ]);
     const pads = nativePads.length ? nativePads.map((pad) => ({
       number: pad.node.name,
@@ -89,13 +103,23 @@ export function useDeviceEngine(): DeviceEngine {
       raw: pad,
     })) : fallbackPads;
     const sounds = nativeSounds
-      .map((sound) => ({
-        id: sound.id || soundIdFromName(sound.name),
-        name: sound.name.replace(/^\d{1,3}\s*/, "") || sound.name,
-        path: sound.path,
-        size: formatBytes(sound.size),
-        raw: sound,
-      }))
+      .map((sound) => {
+        const id = sound.id || soundIdFromName(sound.name);
+        const metaName = metadataString(sound.meta, "name");
+        return {
+          id,
+          name: metaName || cleanSoundName(sound.name) || `Sound ${id}`,
+          path: sound.path,
+          size: formatBytes(sound.size),
+          meta: {
+            name: metaName || undefined,
+            channels: metadataNumber(sound.meta, "channels"),
+            samplerate: metadataNumber(sound.meta, "samplerate"),
+            format: metadataString(sound.meta, "format") || undefined,
+          },
+          raw: sound,
+        };
+      })
       .filter((sound) => sound.id > 0);
     setState((current) => ({
       ...current,

@@ -2,7 +2,7 @@ import { projects, groups } from "@/device/constants";
 import { createWavFromNativePcm, prepareNativeSoundFile } from "@/device/native-audio";
 import { TE_FILE } from "@/device/native-file-protocol";
 import { NativeFileService } from "@/device/native-file-service";
-import { NativeTreeCache } from "@/device/native-tree";
+import { NativeTreeCache, type NativeNode } from "@/device/native-tree";
 
 const pads = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
 
@@ -11,6 +11,10 @@ export type NativePad = {
   path: string;
   meta: Record<string, unknown>;
   assignedPath: string | null;
+};
+
+export type NativeSound = NativeNode & {
+  meta: Record<string, unknown>;
 };
 
 export class NativeDeviceService {
@@ -134,6 +138,21 @@ export class NativeDeviceService {
 
   async listSounds() {
     return this.tree.listChildren("/sounds");
+  }
+
+  async listSoundsWithMetadata(): Promise<NativeSound[]> {
+    const sounds = await this.listSounds();
+    const result: NativeSound[] = [];
+    for (const sound of sounds) {
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = await this.files.getMetadataJson(sound.id);
+      } catch {
+        meta = {};
+      }
+      result.push({ ...sound, meta });
+    }
+    return result;
   }
 
   async findNextFreeSoundSlot(startId = 1) {

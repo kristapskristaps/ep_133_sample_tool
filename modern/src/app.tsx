@@ -17,6 +17,7 @@ import {
   Search,
   SlidersHorizontal,
   Sun,
+  Trash2,
   Upload,
   Usb,
 } from "lucide-react";
@@ -608,6 +609,9 @@ function SampleManager({
     }
     void engine.uploadSamplesToSlots(files, slot.id, Boolean(slot.sound));
   };
+  const selectSlot = (slotId: number) => {
+    setSelectedId(slotId);
+  };
 
   return (
     <Card className="min-h-[calc(100vh-260px)]">
@@ -672,16 +676,24 @@ function SampleManager({
                   const sound = slot.sound;
                   const usage = sound?.usageProjects || [];
                   return (
-                    <button
+                    <div
                       key={slot.id}
-                      onClick={() => setSelectedId(slot.id)}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => selectSlot(slot.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          selectSlot(slot.id);
+                        }
+                      }}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) => {
                         event.preventDefault();
                         uploadToSlot(slot, Array.from(event.dataTransfer.files || []));
                       }}
                       className={cn(
-                        "grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border p-3 text-left text-sm transition hover:border-primary hover:bg-primary/5",
+                        "group grid cursor-pointer grid-cols-[64px_minmax(0,1fr)_132px] items-center gap-3 rounded-md border p-3 text-left text-sm outline-none transition hover:border-primary hover:bg-primary/5 focus-visible:ring-2 focus-visible:ring-ring",
                         sound ? "bg-background" : "border-dashed bg-muted/20 text-muted-foreground",
                         selectedId === slot.id && "border-primary bg-primary/10",
                       )}
@@ -701,8 +713,56 @@ function SampleManager({
                           )}
                         </span>
                       </span>
-                      <span className="text-xs text-muted-foreground">{sound?.size || "available"}</span>
-                    </button>
+                      <span className="flex justify-end">
+                        {sound ? (
+                          <>
+                            <span className="self-center text-xs text-muted-foreground group-hover:hidden group-focus-within:hidden">{sound.size}</span>
+                            <span className="hidden items-center gap-1 group-hover:flex group-focus-within:flex">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  engine.playSound(sound);
+                                }}
+                              >
+                                Play
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                title="Download WAV"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  engine.downloadSound(sound);
+                                }}
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                title="Delete sample"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  engine.deleteSound(sound);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">available</span>
+                        )}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -721,7 +781,9 @@ function SampleManager({
             </div>
           </div>
           <Button size="sm" variant="outline" onClick={() => engine.playSound(selected)} disabled={!selected}>Play</Button>
-          <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>WAV</Button>
+          <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>
+            <Download className="h-4 w-4" /> Download WAV
+          </Button>
           <Button size="sm" variant="outline" onClick={() => engine.deleteSound(selected)} disabled={!selected}>Delete</Button>
         </div>
       </CardContent>

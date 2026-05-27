@@ -23,7 +23,7 @@ function createWindow () {
   } else if (fs.existsSync(modernIndex)) {
     mainWindow.loadFile(modernIndex)
   } else {
-    mainWindow.loadFile('data/index.html')
+    throw new Error('Modern app build not found. Run npm run modern:build before starting Electron.')
   }
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     console.log('Permission request:', permission);
