@@ -4,6 +4,7 @@ interface Window {
   ep133KitBridge?: unknown;
   ep133OfflineDsp?: {
     settings: Record<string, unknown>;
+    setSettings?: (settings: Record<string, unknown>) => void;
     processFiles?: (files: File[]) => Promise<File[]>;
   };
   __EP133_ENGINE_LOADED?: boolean;

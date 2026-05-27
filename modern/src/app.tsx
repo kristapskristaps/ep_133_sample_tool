@@ -123,15 +123,22 @@ type EngineState = {
 };
 
 type SampleSettings = {
+  enabled: boolean;
   normalize: boolean;
   trim: boolean;
   mono: boolean;
+  autoTag: boolean;
   reverse: boolean;
   pingPong: boolean;
   lowCut: boolean;
   highCut: boolean;
   lowCutHz: string;
   highCutHz: string;
+  gainDb: string;
+  trimThresholdDb: string;
+  fadeInMs: string;
+  fadeOutMs: string;
+  targetSampleRate: string;
   targetDb: string;
   sourceBpm: string;
   targetBpm: string;
@@ -147,15 +154,22 @@ const projects = ["01", "02", "03", "04", "05", "06", "07", "08", "09"];
 const groups = ["A", "B", "C", "D"];
 
 const defaultSettings: SampleSettings = {
+  enabled: true,
   normalize: true,
   trim: true,
   mono: false,
+  autoTag: true,
   reverse: false,
   pingPong: false,
   lowCut: false,
   highCut: false,
   lowCutHz: "35",
   highCutHz: "16000",
+  gainDb: "0",
+  trimThresholdDb: "-55",
+  fadeInMs: "0",
+  fadeOutMs: "0",
+  targetSampleRate: "46875",
   targetDb: "-0.3",
   sourceBpm: "",
   targetBpm: "",
@@ -163,22 +177,65 @@ const defaultSettings: SampleSettings = {
 
 function syncOfflineDspSettings(settings: SampleSettings) {
   const payload = {
-    enabled: true,
+    enabled: settings.enabled,
+    autoTag: settings.autoTag,
     normalize: settings.normalize,
     reverseCopy: settings.reverse,
     pingPongCopy: settings.pingPong,
     normalizeTargetDb: Number(settings.targetDb) || -0.3,
+    gainDb: Number(settings.gainDb) || 0,
     trimSilence: settings.trim,
+    trimThresholdDb: Number(settings.trimThresholdDb) || -55,
+    fadeInMs: Number(settings.fadeInMs) || 0,
+    fadeOutMs: Number(settings.fadeOutMs) || 0,
     mono: settings.mono,
     lowCutHz: settings.lowCut ? Number(settings.lowCutHz) || 35 : "",
     highCutHz: settings.highCut ? Number(settings.highCutHz) || 16000 : "",
+    targetSampleRate: Number(settings.targetSampleRate) || 46875,
     sourceBpm: settings.sourceBpm,
     targetBpm: settings.targetBpm,
   };
   const current = window.ep133OfflineDsp?.settings || {};
   const next = { ...current, ...payload };
-  if (window.ep133OfflineDsp) window.ep133OfflineDsp.settings = next;
+  if (window.ep133OfflineDsp?.setSettings) window.ep133OfflineDsp.setSettings(next);
+  else if (window.ep133OfflineDsp) window.ep133OfflineDsp.settings = next;
   localStorage.setItem("ep133.offlineDsp", JSON.stringify(next));
+}
+
+function loadInitialSampleSettings(): SampleSettings {
+  try {
+    const stored = JSON.parse(localStorage.getItem("ep133.offlineDsp") || "{}") as Record<string, unknown>;
+    return {
+      ...defaultSettings,
+      enabled: typeof stored.enabled === "boolean" ? stored.enabled : defaultSettings.enabled,
+      normalize: typeof stored.normalize === "boolean" ? stored.normalize : defaultSettings.normalize,
+      trim: typeof stored.trimSilence === "boolean" ? stored.trimSilence : defaultSettings.trim,
+      mono: typeof stored.mono === "boolean" ? stored.mono : defaultSettings.mono,
+      autoTag: typeof stored.autoTag === "boolean" ? stored.autoTag : defaultSettings.autoTag,
+      reverse: typeof stored.reverseCopy === "boolean" ? stored.reverseCopy : defaultSettings.reverse,
+      pingPong: typeof stored.pingPongCopy === "boolean" ? stored.pingPongCopy : defaultSettings.pingPong,
+      lowCut: Number(stored.lowCutHz) > 0,
+      highCut: Number(stored.highCutHz) > 0,
+      lowCutHz: stored.lowCutHz ? String(stored.lowCutHz) : defaultSettings.lowCutHz,
+      highCutHz: stored.highCutHz ? String(stored.highCutHz) : defaultSettings.highCutHz,
+      gainDb: stored.gainDb != null ? String(stored.gainDb) : defaultSettings.gainDb,
+      trimThresholdDb: stored.trimThresholdDb != null ? String(stored.trimThresholdDb) : defaultSettings.trimThresholdDb,
+      fadeInMs: stored.fadeInMs != null ? String(stored.fadeInMs) : defaultSettings.fadeInMs,
+      fadeOutMs: stored.fadeOutMs != null ? String(stored.fadeOutMs) : defaultSettings.fadeOutMs,
+      targetSampleRate: stored.targetSampleRate != null ? String(stored.targetSampleRate) : defaultSettings.targetSampleRate,
+      targetDb: stored.normalizeTargetDb != null ? String(stored.normalizeTargetDb) : defaultSettings.targetDb,
+      sourceBpm: stored.sourceBpm != null ? String(stored.sourceBpm) : defaultSettings.sourceBpm,
+      targetBpm: stored.targetBpm != null ? String(stored.targetBpm) : defaultSettings.targetBpm,
+    };
+  } catch {
+    return defaultSettings;
+  }
+}
+
+async function processTransferFiles(files: File[]) {
+  const dsp = window.ep133OfflineDsp;
+  if (!dsp?.settings?.enabled || !dsp.processFiles) return files;
+  return dsp.processFiles(files);
 }
 
 function engineAsset(path: string) {
@@ -399,10 +456,11 @@ function useDeviceEngine() {
         return bridge.uploadFilesToPads?.(bridge.classifyFiles?.(files) || files, rawPads);
       }),
     uploadSamples: (files: File[]) =>
-      run((bridge) => {
+      run(async (bridge) => {
+        const processed = await processTransferFiles(files);
         const startId = bridge.uploader?.findNextFreeSoundSlot?.(1);
         if (!startId || startId === -1) return;
-        const error = bridge.uploader?.enqueueFiles?.(startId, bridge.classifyFiles?.(files) || files);
+        const error = bridge.uploader?.enqueueFiles?.(startId, processed);
         if (error) throw error;
       }),
     playSound: (sound?: Sound) => run((bridge) => {
@@ -544,17 +602,39 @@ function SampleSettingsPanel({
         <SectionTitle icon={SlidersHorizontal} title="Sample Settings" description="Applied before sending samples to the selected pad or kit." />
       </CardHeader>
       <CardContent className="grid gap-3">
+        <SettingRow label="DSP on transfer" detail="Process audio before upload" checked={settings.enabled} onCheckedChange={(checked) => update("enabled", checked)} />
         <SettingRow label="Normalize" detail={`Peak target ${settings.targetDb} dBFS`} checked={settings.normalize} onCheckedChange={(checked) => update("normalize", checked)} />
         <SettingRow label="Trim silence" detail="Remove quiet heads and tails" checked={settings.trim} onCheckedChange={(checked) => update("trim", checked)} />
         <SettingRow label="Mono mix" detail="Collapse stereo files for tight kits" checked={settings.mono} onCheckedChange={(checked) => update("mono", checked)} />
+        <SettingRow label="Auto-tag names" detail="Prefix obvious kicks, snares, loops, and FX" checked={settings.autoTag} onCheckedChange={(checked) => update("autoTag", checked)} />
         <SettingRow label="Reverse copy" detail="Create a reversed variant next to source" checked={settings.reverse} onCheckedChange={(checked) => update("reverse", checked)} />
         <SettingRow label="Ping-pong copy" detail="Render forward and reverse playback" checked={settings.pingPong} onCheckedChange={(checked) => update("pingPong", checked)} />
         <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={(checked) => update("lowCut", checked)} />
         <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={(checked) => update("highCut", checked)} />
         <div className="grid grid-cols-2 gap-2">
           <label className="grid gap-1 text-xs text-muted-foreground">
+            Output Hz
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetSampleRate} onChange={(event) => update("targetSampleRate", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
             Target dBFS
             <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetDb} onChange={(event) => update("targetDb", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Gain dB
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.gainDb} onChange={(event) => update("gainDb", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Trim dBFS
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.trimThresholdDb} onChange={(event) => update("trimThresholdDb", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Fade in ms
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.fadeInMs} onChange={(event) => update("fadeInMs", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Fade out ms
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.fadeOutMs} onChange={(event) => update("fadeOutMs", event.target.value)} />
           </label>
           <label className="grid gap-1 text-xs text-muted-foreground">
             Source BPM
@@ -1239,7 +1319,7 @@ export function App() {
   const engine = useDeviceEngine();
   const [view, setView] = useState<"project" | "library">("project");
   const [selectedPad, setSelectedPad] = useState("01");
-  const [settings, setSettings] = useState<SampleSettings>(defaultSettings);
+  const [settings, setSettings] = useState<SampleSettings>(() => loadInitialSampleSettings());
   const [samplerOpen, setSamplerOpen] = useState(false);
   const selected = engine.pads.find((pad) => pad.number === selectedPad);
 

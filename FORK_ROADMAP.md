@@ -49,6 +49,7 @@ The fork adds browser-side DSP controls that are now surfaced in the modern work
 
 Current transfer-time processing:
 
+- Enable or bypass transfer-time DSP from the modern Project view.
 - Peak normalize dropped audio before upload.
 - Set the normalize target in dBFS.
 - Trim leading and trailing silence with an adjustable threshold.
@@ -62,7 +63,7 @@ Current transfer-time processing:
 - Conform loops from a source BPM to a target BPM with Web Audio resampling.
 - Prefix obvious filenames with kit tags like `kick_`, `snare_`, `cymb_`, `perc_`, `bass_`, `loop_`, and `sfx_`.
 
-The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. This keeps most of the upstream bundle untouched; a small bridge is patched into the bundle for kit/device integration.
+The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. Modern Library uploads and Project pad/kit uploads also call the same DSP processor directly through the bridge. This keeps most of the upstream bundle untouched; a small bridge is patched into the bundle for kit/device integration.
 
 Still missing for a full DSP workstation:
 

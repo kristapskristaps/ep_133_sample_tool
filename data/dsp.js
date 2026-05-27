@@ -42,6 +42,12 @@
     localStorage.setItem(STORE_KEY, JSON.stringify(state.settings));
   }
 
+  function setSettings(nextSettings) {
+    state.settings = { ...state.settings, ...(nextSettings || {}) };
+    if (window.ep133OfflineDsp) window.ep133OfflineDsp.settings = state.settings;
+    saveSettings();
+  }
+
   function setStatus(message) {
     if (state.status) state.status.textContent = message || "";
   }
@@ -417,6 +423,7 @@
   window.addEventListener("DOMContentLoaded", buildPanel);
   window.ep133OfflineDsp = {
     settings: state.settings,
+    setSettings,
     processFiles,
   };
 })();
