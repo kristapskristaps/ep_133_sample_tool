@@ -20,6 +20,7 @@ import {
   uploadSamples,
 } from "@/device/legacy-adapter";
 import { projects } from "@/device/constants";
+import { scanNativeMidi } from "@/device/native-midi";
 import type { DeviceEngine, EngineBridge, EngineState, Pad, Sound } from "@/device/types";
 
 function engineAsset(path: string) {
@@ -101,8 +102,8 @@ export function useDeviceEngine(): DeviceEngine {
           return;
         }
         try {
-          const access = await navigator.requestMIDIAccess({ sysex: true });
-          setMidiStatus(midiPortSummary(access));
+          const native = await scanNativeMidi();
+          setMidiStatus(native.status || midiPortSummary(native.access));
           requestLegacyMidi(bridge);
           window.setTimeout(() => setState(snapshotLegacyEngine(bridge)), 2200);
         } catch {
