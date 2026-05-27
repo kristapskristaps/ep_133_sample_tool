@@ -134,6 +134,57 @@ export class FileInfoResponse {
   }
 }
 
+export class FilePutInitRequest implements NativeFileRequest {
+  constructor(
+    private fileId: number,
+    private parentId: number,
+    private flags: number,
+    private fileSize: number,
+    private filename: string,
+    private metadata: string | null = null,
+  ) {
+    this.filename = filename.slice(0, 54);
+  }
+
+  asBytes() {
+    const headerLength = 11 + this.filename.length + 1;
+    const metadataBytes = this.metadata ? new TextEncoder().encode(this.metadata + "\0") : new Uint8Array(0);
+    const bytes = new Uint8Array(headerLength + metadataBytes.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint8(0, TE_FILE.PUT);
+    view.setUint8(1, TE_FILE.PUT_INIT);
+    view.setUint8(2, this.flags);
+    view.setUint16(3, this.fileId);
+    view.setUint16(5, this.parentId);
+    view.setUint32(7, this.fileSize);
+    writeString(view, 11, this.filename, true);
+    bytes.set(metadataBytes, headerLength);
+    return bytes;
+  }
+}
+
+export class FilePutInitResponse {
+  fileId: number;
+
+  constructor(data: Uint8Array) {
+    this.fileId = (data[0] << 8) | data[1];
+  }
+}
+
+export class FilePutDataRequest implements NativeFileRequest {
+  constructor(private page: number, private data: Uint8Array) {}
+
+  asBytes() {
+    const bytes = new Uint8Array(4 + this.data.byteLength);
+    const view = new DataView(bytes.buffer);
+    view.setUint8(0, TE_FILE.PUT);
+    view.setUint8(1, TE_FILE.PUT_DATA);
+    view.setUint16(2, this.page);
+    bytes.set(this.data, 4);
+    return bytes;
+  }
+}
+
 export class FileGetInitRequest implements NativeFileRequest {
   constructor(private fileId: number, private offset: number, private extraArgs: Uint8Array | null = null) {}
 
@@ -238,6 +289,36 @@ export class FileMetadataSetRequest implements NativeFileRequest {
     view.setUint8(1, TE_FILE.METADATA_SET);
     view.setUint16(2, this.fileId);
     writeString(view, 4, this.metadata, true);
+    return bytes;
+  }
+}
+
+export class FileMetadataSetPagedInitRequest implements NativeFileRequest {
+  constructor(private fileId: number, private metadataLength: number) {}
+
+  asBytes() {
+    const bytes = new Uint8Array(7);
+    const view = new DataView(bytes.buffer);
+    view.setUint8(0, TE_FILE.METADATA);
+    view.setUint8(1, TE_FILE.METADATA_SET_PAGED);
+    view.setUint8(2, TE_FILE.METADATA_SET_PAGED_INIT);
+    view.setUint16(3, this.fileId);
+    view.setUint16(5, this.metadataLength);
+    return bytes;
+  }
+}
+
+export class FileMetadataSetPagedDataRequest implements NativeFileRequest {
+  constructor(private page: number, private data: Uint8Array) {}
+
+  asBytes() {
+    const bytes = new Uint8Array(5 + this.data.byteLength);
+    const view = new DataView(bytes.buffer);
+    view.setUint8(0, TE_FILE.METADATA);
+    view.setUint8(1, TE_FILE.METADATA_SET_PAGED);
+    view.setUint8(2, TE_FILE.METADATA_SET_PAGED_DATA);
+    view.setUint16(3, this.page);
+    bytes.set(this.data, 5);
     return bytes;
   }
 }
