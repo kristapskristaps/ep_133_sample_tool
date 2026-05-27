@@ -4,6 +4,8 @@ export type NativeMidiDevice = {
   outputId?: string;
   inputName?: string;
   outputName?: string;
+  model?: string;
+  storageBytes?: number;
   sku?: string;
 };
 
@@ -16,6 +18,7 @@ export type NativeMidiScan = {
 };
 
 const TE_MIDI_ID = [0, 32, 118];
+const MB = 1024 * 1024;
 
 function formatSku(data: Uint8Array) {
   const product = data[8] ^ (data[9] << 7);
@@ -39,6 +42,19 @@ function likelyEpPort(name?: string | null) {
   return /EP|KO|K\.O|teenage|engineering/i.test(name || "");
 }
 
+function inferModel(...values: Array<string | undefined>) {
+  const text = values.filter(Boolean).join(" ").toUpperCase();
+  if (text.includes("EP-40") || text.includes("EP40")) return "EP-40";
+  if (text.includes("EP-1320") || text.includes("EP1320")) return "EP-1320";
+  if (text.includes("EP-133") || text.includes("EP133") || text.includes("KO II") || text.includes("K.O. II")) return "EP-133";
+  return "";
+}
+
+function storageBytesForModel(model: string) {
+  if (model === "EP-40" || model === "EP-1320") return 128 * MB;
+  return 64 * MB;
+}
+
 function pairByName(inputs: MIDIInput[], outputs: MIDIOutput[], identities: Map<string, { deviceId: number; sku: string }>) {
   const devices: NativeMidiDevice[] = [];
   const usedOutputs = new Set<string>();
@@ -51,20 +67,25 @@ function pairByName(inputs: MIDIInput[], outputs: MIDIOutput[], identities: Map<
     });
     if (output) usedOutputs.add(output.id);
     if (likelyEpPort(input.name) || likelyEpPort(output?.name) || identities.has(input.id)) {
+      const identity = identities.get(input.id);
+      const model = inferModel(input.name || undefined, output?.name || undefined, identity?.sku);
       devices.push({
         inputId: input.id,
         outputId: output?.id,
         inputName: input.name || undefined,
         outputName: output?.name || undefined,
-        deviceId: identities.get(input.id)?.deviceId,
-        sku: identities.get(input.id)?.sku,
+        deviceId: identity?.deviceId,
+        model,
+        storageBytes: storageBytesForModel(model),
+        sku: identity?.sku,
       });
     }
   }
 
   for (const output of outputs) {
     if (usedOutputs.has(output.id) || !likelyEpPort(output.name)) continue;
-    devices.push({ outputId: output.id, outputName: output.name || undefined });
+    const model = inferModel(output.name || undefined);
+    devices.push({ outputId: output.id, outputName: output.name || undefined, model, storageBytes: storageBytesForModel(model) });
   }
 
   return devices;

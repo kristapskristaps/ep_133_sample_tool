@@ -3,6 +3,7 @@ import { projects } from "@/device/constants";
 import { NativeDeviceService } from "@/device/native-device-service";
 import { NativeFileService } from "@/device/native-file-service";
 import { scanNativeMidi } from "@/device/native-midi";
+import type { NativeMidiDevice } from "@/device/native-midi";
 import { TeSysexClient } from "@/device/native-sysex";
 import { processTransferFiles } from "@/dsp/settings";
 import type { DeviceEngine, EngineState, Pad, Sound } from "@/device/types";
@@ -13,7 +14,9 @@ const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
   type: "Unassigned",
 }));
 
-const SAMPLE_STORAGE_BYTES = 64 * 1024 * 1024;
+const MB = 1024 * 1024;
+const DEFAULT_SAMPLE_STORAGE_BYTES = 64 * MB;
+const EXTENDED_SAMPLE_STORAGE_BYTES = 128 * MB;
 
 function shortPath(path?: string | null) {
   return path ? path.split("/").pop() || path : "";
@@ -48,6 +51,16 @@ function formatBytes(value?: number) {
     unit++;
   }
   return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function displayDeviceName(device: NativeMidiDevice) {
+  return device.model || device.sku || device.outputName || device.inputName || "EP device";
+}
+
+function storageBytesForUsage(deviceStorageBytes: number | undefined, usedBytes: number) {
+  const base = deviceStorageBytes || DEFAULT_SAMPLE_STORAGE_BYTES;
+  if (usedBytes > DEFAULT_SAMPLE_STORAGE_BYTES && base < EXTENDED_SAMPLE_STORAGE_BYTES) return EXTENDED_SAMPLE_STORAGE_BYTES;
+  return base;
 }
 
 function initialState(): EngineState {
@@ -86,6 +99,7 @@ export function useDeviceEngine(): DeviceEngine {
   const [usageMap, setUsageMap] = useState<Record<number, string[]>>({});
   const serviceRef = useRef<NativeDeviceService | null>(null);
   const sysexRef = useRef<TeSysexClient | null>(null);
+  const storageBytesRef = useRef(DEFAULT_SAMPLE_STORAGE_BYTES);
 
   const refreshNative = useCallback(async () => {
     const service = serviceRef.current;
@@ -124,7 +138,9 @@ export function useDeviceEngine(): DeviceEngine {
       })
       .filter((sound) => sound.id > 0);
     const usedBytes = nativeSounds.reduce((sum, sound) => sum + (Number(sound.size) || 0), 0);
-    const memoryUsedPercent = Math.round((usedBytes / SAMPLE_STORAGE_BYTES) * 100);
+    const storageBytes = storageBytesForUsage(storageBytesRef.current, usedBytes);
+    storageBytesRef.current = storageBytes;
+    const memoryUsedPercent = Math.round((usedBytes / storageBytes) * 100);
     setState((current) => ({
       ...current,
       connected: true,
@@ -133,7 +149,7 @@ export function useDeviceEngine(): DeviceEngine {
       activeGroup: activeGroup?.node.name || "",
       pads,
       sounds,
-      memory: `${formatBytes(usedBytes)} / ${formatBytes(SAMPLE_STORAGE_BYTES)}`,
+      memory: `${formatBytes(usedBytes)} / ${formatBytes(storageBytes)}`,
       memoryUsedPercent,
       status: "Connected via native engine",
     }));
@@ -155,6 +171,7 @@ export function useDeviceEngine(): DeviceEngine {
       const sysex = new TeSysexClient(input, output, device.deviceId ?? 0x7f);
       sysex.open();
       sysexRef.current = sysex;
+      storageBytesRef.current = device.storageBytes || DEFAULT_SAMPLE_STORAGE_BYTES;
       const files = new NativeFileService(sysex);
       const service = new NativeDeviceService(files);
       await service.init();
@@ -162,7 +179,7 @@ export function useDeviceEngine(): DeviceEngine {
       setState((current) => ({
         ...current,
         connected: true,
-        deviceName: device.sku || device.outputName || device.inputName || "EP device",
+        deviceName: displayDeviceName(device),
         status: scan.status,
       }));
       await refreshNative();
