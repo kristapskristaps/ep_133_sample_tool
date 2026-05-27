@@ -1043,10 +1043,24 @@ function SampleManager({
 }) {
   const uploadInput = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  const [bank, setBank] = useState<"all" | string>("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const sounds = engine.sounds.filter((sound) => {
+  const allBanks = Array.from({ length: 10 }, (_, index) => {
+    const start = index * 100;
+    const range = `${start}-${start + 99}`;
+    const count = engine.sounds.filter((sound) => {
+      const soundBank = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
+      return soundBank === start;
+    }).length;
+    return { range, count };
+  });
+  const searchedSounds = engine.sounds.filter((sound) => {
     const text = `${sound.id} ${sound.name} ${sound.path || ""} ${(sound.usageProjects || []).join(" ")}`.toLowerCase();
     return text.includes(query.toLowerCase());
+  });
+  const sounds = bank === "all" ? searchedSounds : searchedSounds.filter((sound) => {
+    const start = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
+    return `${start}-${start + 99}` === bank;
   });
   const selected = sounds.find((sound) => sound.id === selectedId) || sounds[0];
   const groupedSounds = sounds.reduce<Record<string, Sound[]>>((groupsByHundred, sound) => {
@@ -1098,6 +1112,16 @@ function SampleManager({
             <Search className="pointer-events-none absolute bottom-2 left-2.5 h-4 w-4 text-muted-foreground" />
             <input className="h-9 rounded-md border bg-background pl-8 pr-2 text-sm text-foreground" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <Button size="sm" variant={bank === "all" ? "default" : "outline"} onClick={() => setBank("all")}>
+            All {searchedSounds.length}
+          </Button>
+          {allBanks.map(({ range, count }) => (
+            <Button key={range} size="sm" variant={bank === range ? "default" : "outline"} onClick={() => setBank(range)} className="shrink-0">
+              {range} <span className="text-xs opacity-70">{count}</span>
+            </Button>
+          ))}
         </div>
         <div className="grid gap-4 overflow-auto pr-1 xl:max-h-[calc(100vh-430px)]">
           {soundGroups.length ? soundGroups.map(([range, items]) => (

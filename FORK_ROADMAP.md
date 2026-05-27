@@ -28,7 +28,7 @@ Current workspace flow:
 - Apply transfer DSP from the same workspace through `Sample Settings`.
 - Import, export, and inspect the active kit from the main view.
 - Switch to the Library view to manage device memory and samples by 100-slot ranges.
-- Search all loaded samples while preserving the original 0-99, 100-199, 200-299 style grouping.
+- Search all loaded samples while preserving the original 0-99, 100-199, 200-299 style grouping and bank filters.
 - See whether a sample is used by projects such as project 5, 7, or 9 when project pad metadata is available from the connected device.
 
 ### Legacy feature sidebar
@@ -87,7 +87,7 @@ Current kit workflow:
 - Drop a folder or batch of up to 12 audio files on the kit drop zone to auto-sort and assign pads.
 - Play, download as WAV, or clear an assigned pad.
 - Browse loaded samples in the Library view, see memory usage, search across all sample banks, preview, download WAVs, and delete samples.
-- Keep the original 100-sample bank separation while still filtering search results across every bank.
+- Keep the original 100-sample bank separation and selectable bank filters while still filtering search results across every bank.
 - Show project usage labels for sounds referenced by project pad assignments.
 - Export the active group as a kit archive ZIP containing assigned pad WAV files and a `kit.json` manifest.
 - Import a kit archive ZIP exported by this fork and restore its samples to the matching active-group pads.
