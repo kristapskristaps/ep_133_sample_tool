@@ -937,9 +937,44 @@ function ConnectionDot({ engine }: { engine: DeviceEngine }) {
   return <span className={cn("h-2.5 w-2.5 rounded-full", color)} />;
 }
 
+function ConnectOverlay({ engine }: { engine: DeviceEngine }) {
+  const connecting = /scanning/i.test(engine.status) && !engine.connected;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-xl border bg-card p-6 text-card-foreground shadow-2xl">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-3 text-primary">
+            <Usb className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold">Connect your EP device</h1>
+            <p className="text-sm text-muted-foreground">Plug in the EP-133 or EP-40 over USB, then allow MIDI/SysEx access.</p>
+          </div>
+        </div>
+        <div className="mb-5 grid gap-2 rounded-lg border bg-muted/35 p-3 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Connection</span>
+            <span className="flex items-center gap-2 font-medium">
+              <ConnectionDot engine={engine} />
+              {connecting ? "Scanning" : "Not connected"}
+            </span>
+          </div>
+          <div className="text-xs text-muted-foreground">{engine.status}</div>
+        </div>
+        <Button className="w-full" onClick={engine.connect}>
+          <Usb className="h-4 w-4" />
+          {connecting ? "Scanning for device" : "Connect device"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const { dark, setDark } = useTheme();
   const engine = useDeviceEngine();
+  const autoConnectStarted = useRef(false);
   const [view, setView] = useState<"project" | "library">("project");
   const [selectedPad, setSelectedPad] = useState("01");
   const [settings, setSettings] = useState<SampleSettings>(() => loadInitialSampleSettings());
@@ -950,10 +985,16 @@ export function App() {
     syncOfflineDspSettings(settings);
   }, [settings]);
 
+  useEffect(() => {
+    if (autoConnectStarted.current || engine.connected) return;
+    autoConnectStarted.current = true;
+    void engine.connect();
+  }, [engine]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <DeviceEngineHost />
-      <main>
+      <main className={cn(!engine.connected && "pointer-events-none select-none blur-sm")}>
         <header className="sticky top-0 z-20 grid min-h-16 gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur lg:grid-cols-[1fr_auto_1fr] lg:items-center">
           <div className="min-w-0">
             <div className="text-lg font-semibold">EP-133</div>
@@ -1022,6 +1063,7 @@ export function App() {
           setSamplerOpen(false);
         }}
       />
+      {!engine.connected && <ConnectOverlay engine={engine} />}
     </div>
   );
 }
