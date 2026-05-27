@@ -620,20 +620,8 @@ function SampleManager({
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <div className="grid gap-3 rounded-lg border bg-muted/35 p-3 md:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{engine.connected ? engine.memory : "Connect to read memory"}</span>
-              <span>{engine.connected ? `${engine.memoryUsedPercent}%` : "--"}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted/80">
-              <div
-                className={cn("h-full transition-all", engine.uploading ? "bg-amber-400" : "bg-primary")}
-                style={{ width: engine.connected ? `${Math.min(100, engine.memoryUsedPercent)}%` : "0%" }}
-              />
-            </div>
-          </div>
-          <label className="relative grid gap-1 text-xs text-muted-foreground">
+        <div className="rounded-lg border bg-muted/35 p-3">
+          <label className="relative grid gap-1 text-xs text-muted-foreground md:max-w-sm">
             Search samples
             <Search className="pointer-events-none absolute bottom-2 left-2.5 h-4 w-4 text-muted-foreground" />
             <input className="h-9 rounded-md border bg-background pl-8 pr-2 text-sm text-foreground" value={query} onChange={(event) => setQuery(event.target.value)} />
