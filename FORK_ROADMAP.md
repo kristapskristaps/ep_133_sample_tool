@@ -19,6 +19,8 @@ The modern shell is the new primary UI direction:
 
 The hardware runtime is currently bridged through the original TE bundle mounted into a hidden same-window root. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules. The original app is no longer presented as a user-facing tab or panel in the modern UI.
 
+The modern UI now talks to typed `device` and `dsp` modules instead of reaching into `window.ep133KitBridge` directly. The current `device/legacy-engine` module still hosts the compatibility runtime, but it is now the replaceable adapter boundary for the native device-service extraction.
+
 Current workspace flow:
 
 - Select the active project and group.
@@ -116,6 +118,7 @@ System audio capture depends on the Chromium/WebRTC picker and host OS permissio
 
 ### Device service extraction
 
+- Done: isolate the hidden compatibility runtime behind typed modern `device` and `dsp` modules.
 - Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
 - Replace the hidden compatibility engine with native React device-service modules.
 - Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
