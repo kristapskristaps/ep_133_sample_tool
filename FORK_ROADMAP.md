@@ -30,6 +30,7 @@ Native device work has started behind that boundary:
 - The public `@/device` facade now exports the native-only engine. It does not fall back to the hidden legacy runtime; unsupported native actions report as unsupported instead of silently using legacy code.
 - Native audio upload now decodes browser-supported audio, renders 46.875 kHz 16-bit PCM, writes sound metadata, uploads to library slots, and assigns uploaded sounds to target pads. Native downloads wrap device PCM back into WAV files.
 - Lo-Fi mode can intentionally lower upload sample rate and bit-crush the signal before native transfer.
+- Library view renders all 999 addressable sound slots. Dropping on an empty slot uploads there; dropping on an occupied slot asks before replacing.
 
 Current workspace flow:
 

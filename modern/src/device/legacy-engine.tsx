@@ -151,6 +151,7 @@ export function useDeviceEngine(): DeviceEngine {
     setGroup: (group: string) => run((bridge) => setGroup(bridge, group)),
     uploadToPads: (files: File[], pads: Pad[]) => run((bridge) => uploadFilesToPads(bridge, files, pads)),
     uploadSamples: (files: File[]) => run((bridge) => uploadSamples(bridge, files)),
+    uploadSamplesToSlots: (files: File[]) => run((bridge) => uploadSamples(bridge, files)),
     playSound: (sound?: Sound) => run((bridge) => playSound(bridge, sound)),
     deleteSound: (sound?: Sound) => run((bridge) => deleteSound(bridge, sound)),
     downloadSound: (sound?: Sound) => run((bridge) => downloadSound(bridge, sound)),

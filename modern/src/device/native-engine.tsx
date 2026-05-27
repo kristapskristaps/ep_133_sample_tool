@@ -214,6 +214,14 @@ export function useDeviceEngine(): DeviceEngine {
       });
       setState((current) => ({ ...current, uploading: false, status: "Native library upload complete" }));
     }),
+    uploadSamplesToSlots: (files: File[], startSlot: number) => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: `Preparing slot ${String(startSlot).padStart(3, "0")}` }));
+      const processed = await processTransferFiles(files);
+      await service.uploadSoundsToSlots(processed, startSlot, (file, current, total) => {
+        setState((existing) => ({ ...existing, uploading: true, status: `Uploading ${file.name}: ${Math.round((current / Math.max(1, total)) * 100)}%` }));
+      });
+      setState((current) => ({ ...current, uploading: false, status: "Native slot upload complete" }));
+    }),
     playSound: (sound?: Sound) => runNative(async (service) => {
       if (sound?.path) await service.playback(sound.path, true);
     }),

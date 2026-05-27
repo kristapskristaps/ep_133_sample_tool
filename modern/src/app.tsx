@@ -559,32 +559,55 @@ function SampleManager({
   const [query, setQuery] = useState("");
   const [bank, setBank] = useState<"all" | string>("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const soundById = new Map(engine.sounds.map((sound) => [sound.id, sound]));
+  const slots = Array.from({ length: 999 }, (_, index) => {
+    const id = index + 1;
+    return {
+      id,
+      sound: soundById.get(id),
+    };
+  });
   const allBanks = Array.from({ length: 10 }, (_, index) => {
     const start = index * 100;
     const range = `${start}-${start + 99}`;
-    const count = engine.sounds.filter((sound) => {
-      const soundBank = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
-      return soundBank === start;
-    }).length;
-    return { range, count };
+    const bankSlots = slots.filter((slot) => Math.floor((slot.id - 1) / 100) * 100 === start);
+    const count = bankSlots.filter((slot) => slot.sound).length;
+    return { range, count, total: bankSlots.length };
   });
-  const searchedSounds = engine.sounds.filter((sound) => {
-    const text = `${sound.id} ${sound.name} ${sound.path || ""} ${(sound.usageProjects || []).join(" ")}`.toLowerCase();
+  const searchedSlots = slots.filter((slot) => {
+    const sound = slot.sound;
+    if (!query.trim()) return true;
+    const text = `${slot.id} ${sound?.name || "empty"} ${sound?.path || ""} ${(sound?.usageProjects || []).join(" ")}`.toLowerCase();
     return text.includes(query.toLowerCase());
   });
-  const sounds = bank === "all" ? searchedSounds : searchedSounds.filter((sound) => {
-    const start = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
+  const visibleSlots = bank === "all" ? searchedSlots : searchedSlots.filter((slot) => {
+    const start = Math.floor((slot.id - 1) / 100) * 100;
     return `${start}-${start + 99}` === bank;
   });
-  const selected = sounds.find((sound) => sound.id === selectedId) || sounds[0];
-  const groupedSounds = sounds.reduce<Record<string, Sound[]>>((groupsByHundred, sound) => {
-    const start = Math.floor((Math.max(1, sound.id) - 1) / 100) * 100;
+  const selected = (selectedId ? soundById.get(selectedId) : undefined) || visibleSlots.find((slot) => slot.sound)?.sound;
+  const groupedSlots = visibleSlots.reduce<Record<string, Array<{ id: number; sound?: Sound }>>>((groupsByHundred, slot) => {
+    const start = Math.floor((slot.id - 1) / 100) * 100;
     const range = `${start}-${start + 99}`;
     if (!groupsByHundred[range]) groupsByHundred[range] = [];
-    groupsByHundred[range].push(sound);
+    groupsByHundred[range].push(slot);
     return groupsByHundred;
   }, {});
-  const soundGroups = Object.entries(groupedSounds).sort(([a], [b]) => Number(a.split("-")[0]) - Number(b.split("-")[0]));
+  const slotGroups = Object.entries(groupedSlots).sort(([a], [b]) => Number(a.split("-")[0]) - Number(b.split("-")[0]));
+
+  const uploadToSlot = (slot: { id: number; sound?: Sound }, files: File[]) => {
+    if (!files.length) return;
+    const occupiedTargets = files
+      .map((_, index) => soundById.get(slot.id + index))
+      .filter((sound): sound is Sound => Boolean(sound));
+    if (occupiedTargets.length) {
+      const label = occupiedTargets.length === 1
+        ? `sample ${String(occupiedTargets[0].id).padStart(3, "0")} "${occupiedTargets[0].name}"`
+        : `${occupiedTargets.length} occupied slots starting at ${String(slot.id).padStart(3, "0")}`;
+      const confirmed = window.confirm(`Replace ${label}?`);
+      if (!confirmed) return;
+    }
+    void engine.uploadSamplesToSlots(files, slot.id, Boolean(slot.sound));
+  };
 
   return (
     <Card className="min-h-[calc(100vh-260px)]">
@@ -629,38 +652,47 @@ function SampleManager({
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           <Button size="sm" variant={bank === "all" ? "default" : "outline"} onClick={() => setBank("all")}>
-            All {searchedSounds.length}
+            All {engine.sounds.length}/999
           </Button>
-          {allBanks.map(({ range, count }) => (
+          {allBanks.map(({ range, count, total }) => (
             <Button key={range} size="sm" variant={bank === range ? "default" : "outline"} onClick={() => setBank(range)} className="shrink-0">
-              {range} <span className="text-xs opacity-70">{count}</span>
+              {range} <span className="text-xs opacity-70">{count}/{total}</span>
             </Button>
           ))}
         </div>
         <div className="grid gap-4 overflow-auto pr-1 xl:max-h-[calc(100vh-430px)]">
-          {soundGroups.length ? soundGroups.map(([range, items]) => (
+          {slotGroups.length ? slotGroups.map(([range, items]) => (
             <section key={range} className="grid gap-2">
               <div className="sticky top-0 z-10 flex items-center justify-between rounded-md border bg-card/95 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
                 <span>Samples {range}</span>
-                <span>{items.length} shown</span>
+                <span>{items.filter((slot) => slot.sound).length}/{items.length} used</span>
               </div>
               <div className="grid gap-2">
-                {items.map((sound) => {
-                  const usage = sound.usageProjects || [];
+                {items.map((slot) => {
+                  const sound = slot.sound;
+                  const usage = sound?.usageProjects || [];
                   return (
                     <button
-                      key={sound.id}
-                      onClick={() => setSelectedId(sound.id)}
+                      key={slot.id}
+                      onClick={() => setSelectedId(slot.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        uploadToSlot(slot, Array.from(event.dataTransfer.files || []));
+                      }}
                       className={cn(
-                        "grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-background p-3 text-left text-sm transition hover:border-primary hover:bg-primary/5",
-                        selected?.id === sound.id && "border-primary bg-primary/10",
+                        "grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-md border p-3 text-left text-sm transition hover:border-primary hover:bg-primary/5",
+                        sound ? "bg-background" : "border-dashed bg-muted/20 text-muted-foreground",
+                        selectedId === slot.id && "border-primary bg-primary/10",
                       )}
                     >
-                      <span className="rounded-md bg-muted px-2 py-1 text-center font-mono text-xs text-muted-foreground">{String(sound.id).padStart(3, "0")}</span>
+                      <span className="rounded-md bg-muted px-2 py-1 text-center font-mono text-xs text-muted-foreground">{String(slot.id).padStart(3, "0")}</span>
                       <span className="min-w-0">
-                        <span className="block truncate font-medium">{sound.name}</span>
+                        <span className="block truncate font-medium">{sound?.name || "empty slot"}</span>
                         <span className="mt-1 flex flex-wrap gap-1">
-                          {usage.length ? usage.map((project) => (
+                          {!sound ? (
+                            <span className="rounded-sm border border-dashed bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground">drop sample here</span>
+                          ) : usage.length ? usage.map((project) => (
                             <span key={project} className="rounded-sm border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                               Project {Number(project)}
                             </span>
@@ -669,7 +701,7 @@ function SampleManager({
                           )}
                         </span>
                       </span>
-                      <span className="text-xs text-muted-foreground">{sound.size}</span>
+                      <span className="text-xs text-muted-foreground">{sound?.size || "available"}</span>
                     </button>
                   );
                 })}
@@ -677,7 +709,7 @@ function SampleManager({
             </section>
           )) : (
             <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-              {engine.connected ? "No samples match the current search." : "Connect a device to load samples."}
+              {engine.connected ? "No slots match the current search." : "Connect a device to load samples."}
             </div>
           )}
         </div>

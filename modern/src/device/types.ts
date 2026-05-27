@@ -102,6 +102,7 @@ export type DeviceActions = {
   setGroup: (group: string) => void | Promise<void>;
   uploadToPads: (files: File[], pads: Pad[]) => void | Promise<void>;
   uploadSamples: (files: File[]) => void | Promise<void>;
+  uploadSamplesToSlots: (files: File[], startSlot: number, replace?: boolean) => void | Promise<void>;
   playSound: (sound?: Sound) => void | Promise<void>;
   deleteSound: (sound?: Sound) => void | Promise<void>;
   downloadSound: (sound?: Sound) => void | Promise<void>;

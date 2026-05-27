@@ -177,6 +177,16 @@ export class NativeDeviceService {
     return uploaded;
   }
 
+  async uploadSoundsToSlots(files: File[], startSlot: number, onProgress?: (file: File, current: number, total: number) => void) {
+    const uploaded: Array<{ id: number; path: string; name: string }> = [];
+    for (let index = 0; index < files.length; index++) {
+      const slot = startSlot + index;
+      if (slot < 1 || slot > 999) throw new Error(`invalid sound slot ${slot}`);
+      uploaded.push(await this.uploadSound(files[index], slot, (current, total) => onProgress?.(files[index], current, total)));
+    }
+    return uploaded;
+  }
+
   async uploadSoundsToPads(files: File[], padPaths: string[], onProgress?: (file: File, current: number, total: number) => void) {
     const uploaded = await this.uploadSounds(files.slice(0, padPaths.length), onProgress);
     for (let index = 0; index < uploaded.length; index++) {
