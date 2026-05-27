@@ -25,6 +25,7 @@ Native device work has started behind that boundary:
 
 - `device/native-midi` requests Web MIDI/Sysex permission, sends the standard MIDI identity request, parses TE manufacturer identity responses, and pairs EP input/output ports.
 - `device/native-sysex` implements TE Sysex 7-bit packing/unpacking, request message construction, response parsing, and a request/response client.
+- `device/native-file-protocol` and `device/native-file-service` implement native TE file commands for listing nodes, reading/setting metadata, deleting files, and starting/stopping playback.
 
 Current workspace flow:
 
@@ -126,6 +127,7 @@ System audio capture depends on the Chromium/WebRTC picker and host OS permissio
 - Done: isolate the hidden compatibility runtime behind typed modern `device` and `dsp` modules.
 - Done: move legacy bridge operations behind a `device/legacy-adapter` service boundary.
 - Done: add native Web MIDI discovery and TE Sysex request/response primitives.
+- Done: add native TE file protocol primitives and a partial file service.
 - Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
 - Replace the hidden compatibility engine with native React device-service modules.
 - Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
