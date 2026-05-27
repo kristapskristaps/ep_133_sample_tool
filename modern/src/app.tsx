@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
-  AudioLines,
   AudioWaveform,
   CheckCircle2,
   CircleDot,
@@ -11,7 +10,6 @@ import {
   LayoutDashboard,
   Mic2,
   Moon,
-  Music2,
   RotateCcw,
   Scissors,
   Search,
@@ -37,22 +35,6 @@ function useTheme() {
   }, [dark]);
 
   return { dark, setDark };
-}
-
-function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Gauge }) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div className="rounded-md bg-primary/10 p-2 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-          <div className="truncate text-lg font-semibold">{value}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
 }
 
 function SectionTitle({ icon: Icon, title, description }: { icon: typeof Gauge; title: string; description: string }) {
@@ -641,11 +623,14 @@ function SampleManager({
         <div className="grid gap-3 rounded-lg border bg-muted/35 p-3 md:grid-cols-[minmax(0,1fr)_220px]">
           <div className="grid gap-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{engine.memory}</span>
-              <span>{engine.memoryUsedPercent}%</span>
+              <span>{engine.connected ? engine.memory : "Connect to read memory"}</span>
+              <span>{engine.connected ? `${engine.memoryUsedPercent}%` : "--"}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div className="h-full bg-primary" style={{ width: `${Math.min(100, engine.memoryUsedPercent)}%` }} />
+            <div className="h-2 overflow-hidden rounded-full bg-muted/80">
+              <div
+                className={cn("h-full transition-all", engine.uploading ? "bg-amber-400" : "bg-primary")}
+                style={{ width: engine.connected ? `${Math.min(100, engine.memoryUsedPercent)}%` : "0%" }}
+              />
             </div>
           </div>
           <label className="relative grid gap-1 text-xs text-muted-foreground">
@@ -946,6 +931,12 @@ function LibraryView({ engine }: { engine: DeviceEngine }) {
   return <SampleManager engine={engine} />;
 }
 
+function ConnectionDot({ engine }: { engine: DeviceEngine }) {
+  const busy = engine.uploading || /scanning|preparing|uploading/i.test(engine.status);
+  const color = engine.connected ? busy ? "bg-amber-400" : "bg-emerald-500" : busy ? "bg-amber-400" : "bg-red-500";
+  return <span className={cn("h-2.5 w-2.5 rounded-full", color)} />;
+}
+
 export function App() {
   const { dark, setDark } = useTheme();
   const engine = useDeviceEngine();
@@ -962,72 +953,52 @@ export function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <DeviceEngineHost />
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-sidebar lg:block">
-        <div className="flex h-16 items-center gap-2 border-b px-5">
-          <div className="rounded-md bg-primary p-2 text-primary-foreground">
-            <Music2 className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="font-semibold">EP-133</div>
-            <div className="text-xs text-muted-foreground">Sampler workspace</div>
-          </div>
-        </div>
-        <nav className="grid gap-1 p-3">
-          <button
-            onClick={() => setView("project")}
-            className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground", view === "project" && "bg-muted text-foreground")}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            Project
-          </button>
-          <button
-            onClick={() => setView("library")}
-            className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground", view === "library" && "bg-muted text-foreground")}
-          >
-            <Archive className="h-4 w-4" />
-            Library
-          </button>
-        </nav>
-      </aside>
-      <main className="lg:pl-64">
-        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+      <main>
+        <header className="sticky top-0 z-20 grid min-h-16 gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur lg:grid-cols-[1fr_auto_1fr] lg:items-center">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold">{view === "project" ? "Project View" : "Library View"}</h1>
-            <p className="hidden text-sm text-muted-foreground sm:block">
-              {view === "project"
-                ? "Select a project, group, and pad. Then sample, process, upload, import, or export."
-                : "Manage device memory, browse sample banks, search, preview, export, and clear sounds."}
-            </p>
+            <div className="text-lg font-semibold">EP-133</div>
+            <div className="truncate text-sm text-muted-foreground">{engine.connected ? engine.target : "Connect your device"}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="mx-auto inline-flex rounded-full border bg-muted/45 p-1">
+            <button
+              onClick={() => setView("project")}
+              className={cn(
+                "inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-medium text-muted-foreground transition hover:text-foreground",
+                view === "project" && "bg-background text-foreground shadow-sm",
+              )}
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              Project
+            </button>
+            <button
+              onClick={() => setView("library")}
+              className={cn(
+                "inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-medium text-muted-foreground transition hover:text-foreground",
+                view === "library" && "bg-background text-foreground shadow-sm",
+              )}
+            >
+              <Archive className="h-4 w-4" />
+              Library
+            </button>
+          </div>
+          <div className="flex items-center justify-start gap-2 lg:justify-end">
+            <div className="flex min-w-0 items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm">
+              <Gauge className="h-4 w-4 text-muted-foreground" />
+              <span className="hidden text-muted-foreground sm:inline">Memory</span>
+              <span className="font-medium">{engine.memory}</span>
+            </div>
             <Button variant="outline" onClick={() => setDark(!dark)}>
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               {dark ? "Light" : "Dark"}
             </Button>
             <Button variant="outline" onClick={engine.connected ? engine.refresh : engine.connect}>
-              <Usb className="h-4 w-4" /> {engine.connected ? "Refresh" : "Connect"}
+              <ConnectionDot engine={engine} />
+              <Usb className="h-4 w-4" />
+              {engine.connected ? "Connected" : /scanning/i.test(engine.status) ? "Connecting" : "Connect"}
             </Button>
           </div>
         </header>
         <div className="grid gap-6 p-6">
-          <div className="grid grid-cols-2 gap-2 lg:hidden">
-            <Button variant={view === "project" ? "default" : "outline"} onClick={() => setView("project")}>
-              <LayoutDashboard className="h-4 w-4" /> Project
-            </Button>
-            <Button variant={view === "library" ? "default" : "outline"} onClick={() => setView("library")}>
-              <Archive className="h-4 w-4" /> Library
-            </Button>
-          </div>
-          <div className="grid gap-4 md:grid-cols-4">
-            <Stat label="Device" value={engine.ready ? engine.deviceName : "Engine loading"} icon={Usb} />
-            <Stat label="Target" value={engine.target} icon={LayoutDashboard} />
-            <Stat label="Memory" value={engine.memory} icon={Gauge} />
-            <Stat label="Samples" value={`${engine.sounds.length}`} icon={AudioLines} />
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/35 px-4 py-3 text-sm">
-            <span className="text-muted-foreground">Status</span>
-            <span className="font-medium">{engine.status}</span>
-          </div>
           {view === "project" ? (
             <Workspace
               engine={engine}

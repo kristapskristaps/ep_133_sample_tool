@@ -13,6 +13,8 @@ const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
   type: "Unassigned",
 }));
 
+const SAMPLE_STORAGE_BYTES = 64 * 1024 * 1024;
+
 function shortPath(path?: string | null) {
   return path ? path.split("/").pop() || path : "";
 }
@@ -54,7 +56,7 @@ function initialState(): EngineState {
     connected: false,
     deviceName: "No device",
     target: "Select device",
-    memory: "waiting",
+    memory: "No device",
     pads: fallbackPads,
     activeProject: "",
     activeGroup: "",
@@ -121,6 +123,8 @@ export function useDeviceEngine(): DeviceEngine {
         };
       })
       .filter((sound) => sound.id > 0);
+    const usedBytes = nativeSounds.reduce((sum, sound) => sum + (Number(sound.size) || 0), 0);
+    const memoryUsedPercent = Math.round((usedBytes / SAMPLE_STORAGE_BYTES) * 100);
     setState((current) => ({
       ...current,
       connected: true,
@@ -129,6 +133,8 @@ export function useDeviceEngine(): DeviceEngine {
       activeGroup: activeGroup?.node.name || "",
       pads,
       sounds,
+      memory: `${formatBytes(usedBytes)} / ${formatBytes(SAMPLE_STORAGE_BYTES)}`,
+      memoryUsedPercent,
       status: "Connected via native engine",
     }));
   }, []);
