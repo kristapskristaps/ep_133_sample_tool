@@ -23,8 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { DeviceEngineHost, groups, projects, useDeviceEngine } from "@/device/legacy-engine";
-import type { Pad, Sound } from "@/device/types";
+import { DeviceEngineHost, groups, projects, useDeviceEngine, type DeviceEngine, type Pad, type Sound } from "@/device";
 import { defaultSettings, loadInitialSampleSettings, syncOfflineDspSettings, type SampleSettings } from "@/dsp/settings";
 import { cn } from "@/lib/utils";
 
@@ -545,7 +544,7 @@ function SampleModal({
 function SampleManager({
   engine,
 }: {
-  engine: ReturnType<typeof useDeviceEngine>;
+  engine: DeviceEngine;
 }) {
   const uploadInput = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -697,7 +696,7 @@ function Workspace({
   setSettings,
   onOpenSampler,
 }: {
-  engine: ReturnType<typeof useDeviceEngine>;
+  engine: DeviceEngine;
   selectedPad: string;
   setSelectedPad: (pad: string) => void;
   settings: SampleSettings;
@@ -840,7 +839,7 @@ function Workspace({
   );
 }
 
-function LibraryView({ engine }: { engine: ReturnType<typeof useDeviceEngine> }) {
+function LibraryView({ engine }: { engine: DeviceEngine }) {
   return <SampleManager engine={engine} />;
 }
 
