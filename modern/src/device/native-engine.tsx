@@ -4,6 +4,7 @@ import { NativeDeviceService } from "@/device/native-device-service";
 import { NativeFileService } from "@/device/native-file-service";
 import { scanNativeMidi } from "@/device/native-midi";
 import { TeSysexClient } from "@/device/native-sysex";
+import { processTransferFiles } from "@/dsp/settings";
 import type { DeviceEngine, EngineState, Pad, Sound } from "@/device/types";
 
 const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
@@ -60,10 +61,6 @@ function downloadBlob(blob: Blob, filename: string) {
   link.remove();
 }
 
-function blobFromChunks(chunks: Uint8Array[]) {
-  return new Blob(chunks.map((chunk) => Uint8Array.from(chunk)));
-}
-
 export function DeviceEngineHost() {
   return null;
 }
@@ -93,7 +90,7 @@ export function useDeviceEngine(): DeviceEngine {
     })) : fallbackPads;
     const sounds = nativeSounds
       .map((sound) => ({
-        id: soundIdFromName(sound.name),
+        id: sound.id || soundIdFromName(sound.name),
         name: sound.name.replace(/^\d{1,3}\s*/, "") || sound.name,
         path: sound.path,
         size: formatBytes(sound.size),
@@ -182,7 +179,7 @@ export function useDeviceEngine(): DeviceEngine {
       await refreshNative();
     } catch (error) {
       console.error(error);
-      setState((current) => ({ ...current, status: error instanceof Error ? error.message : "Native operation failed" }));
+      setState((current) => ({ ...current, uploading: false, status: error instanceof Error ? error.message : "Native operation failed" }));
     }
   }, [refreshNative]);
 
@@ -197,8 +194,26 @@ export function useDeviceEngine(): DeviceEngine {
     refresh: () => runNative(async () => refreshNative()),
     setProject: (project: string) => runNative((service) => service.setActiveProject(project)),
     setGroup: (group: string) => runNative((service) => service.setActiveGroup(group)),
-    uploadToPads: () => unsupported("Native audio upload to pads"),
-    uploadSamples: () => unsupported("Native library upload"),
+    uploadToPads: (files: File[], pads: Pad[]) => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"}` }));
+      const processed = await processTransferFiles(files);
+      const padPaths = pads.flatMap((pad) => {
+        const raw = pad.raw as { path?: string } | undefined;
+        return raw?.path ? [raw.path] : [];
+      });
+      await service.uploadSoundsToPads(processed, padPaths, (file, current, total) => {
+        setState((existing) => ({ ...existing, uploading: true, status: `Uploading ${file.name}: ${Math.round((current / Math.max(1, total)) * 100)}%` }));
+      });
+      setState((current) => ({ ...current, uploading: false, status: "Native pad upload complete" }));
+    }),
+    uploadSamples: (files: File[]) => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"}` }));
+      const processed = await processTransferFiles(files);
+      await service.uploadSounds(processed, (file, current, total) => {
+        setState((existing) => ({ ...existing, uploading: true, status: `Uploading ${file.name}: ${Math.round((current / Math.max(1, total)) * 100)}%` }));
+      });
+      setState((current) => ({ ...current, uploading: false, status: "Native library upload complete" }));
+    }),
     playSound: (sound?: Sound) => runNative(async (service) => {
       if (sound?.path) await service.playback(sound.path, true);
     }),
@@ -207,8 +222,8 @@ export function useDeviceEngine(): DeviceEngine {
     }),
     downloadSound: (sound?: Sound) => runNative(async (service) => {
       if (!sound?.path) return;
-      const raw = await service.downloadRaw(sound.path);
-      downloadBlob(blobFromChunks(raw.data), `${String(sound.id).padStart(3, "0")} ${sound.name || "sample"}.raw`);
+      const wav = await service.downloadWav(sound.path);
+      downloadBlob(wav, `${String(sound.id).padStart(3, "0")} ${sound.name || "sample"}.wav`);
     }),
     playPad: (pad?: Pad) => runNative(async (service) => {
       if (pad?.assignedPath) await service.playback(pad.assignedPath, true);
@@ -219,8 +234,8 @@ export function useDeviceEngine(): DeviceEngine {
     }),
     downloadPad: (pad?: Pad) => runNative(async (service) => {
       if (!pad?.assignedPath) return;
-      const raw = await service.downloadRaw(pad.assignedPath);
-      downloadBlob(blobFromChunks(raw.data), `${shortPath(pad.assignedPath) || "pad"}.raw`);
+      const wav = await service.downloadWav(pad.assignedPath);
+      downloadBlob(wav, `${shortPath(pad.assignedPath) || "pad"}.wav`);
     }),
     exportKit: () => unsupported("Native kit export"),
     importKit: () => unsupported("Native kit import"),

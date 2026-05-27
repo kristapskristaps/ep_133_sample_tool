@@ -1,4 +1,6 @@
 import { projects, groups } from "@/device/constants";
+import { createWavFromNativePcm, prepareNativeSoundFile } from "@/device/native-audio";
+import { TE_FILE } from "@/device/native-file-protocol";
 import { NativeFileService } from "@/device/native-file-service";
 import { NativeTreeCache } from "@/device/native-tree";
 
@@ -121,8 +123,66 @@ export class NativeDeviceService {
     return this.files.get(await this.tree.getNodeIdByPath(path), onProgress);
   }
 
+  async downloadWav(path: string, onProgress?: (current: number, total: number) => void) {
+    const fileId = await this.tree.getNodeIdByPath(path);
+    const [metadata, raw] = await Promise.all([
+      this.files.getMetadataJson(fileId),
+      this.files.get(fileId, onProgress),
+    ]);
+    return createWavFromNativePcm(raw.data, metadata);
+  }
+
   async listSounds() {
     return this.tree.listChildren("/sounds");
+  }
+
+  async findNextFreeSoundSlot(startId = 1) {
+    const sounds = await this.listSounds();
+    const used = new Set(sounds.map((sound) => sound.id));
+    for (let id = Math.max(1, startId); id <= 999; id++) {
+      if (!used.has(id)) return id;
+    }
+    return -1;
+  }
+
+  async uploadSound(file: File, slotId?: number, onProgress?: (current: number, total: number) => void) {
+    const soundsId = await this.tree.getNodeIdByPath("/sounds");
+    const id = slotId || await this.findNextFreeSoundSlot();
+    if (!id || id === -1) throw new Error("no free sound slots");
+    const prepared = await prepareNativeSoundFile(file);
+    await this.files.put(soundsId, prepared.bytes, prepared.name, {
+      fileId: id,
+      metadata: prepared.metadata,
+      capabilities: [TE_FILE.CAPABILITY_READ],
+      onProgress: (current, total) => onProgress?.(current, total),
+    });
+    await this.files.setMetadata(id, prepared.metadata);
+    this.tree.clear();
+    return {
+      id,
+      path: await this.tree.getPathByNodeId(id),
+      name: prepared.name,
+    };
+  }
+
+  async uploadSounds(files: File[], onProgress?: (file: File, current: number, total: number) => void) {
+    const uploaded: Array<{ id: number; path: string; name: string }> = [];
+    let cursor = 1;
+    for (const file of files) {
+      const slot = await this.findNextFreeSoundSlot(cursor);
+      if (slot === -1) throw new Error("no free sound slots");
+      uploaded.push(await this.uploadSound(file, slot, (current, total) => onProgress?.(file, current, total)));
+      cursor = slot + 1;
+    }
+    return uploaded;
+  }
+
+  async uploadSoundsToPads(files: File[], padPaths: string[], onProgress?: (file: File, current: number, total: number) => void) {
+    const uploaded = await this.uploadSounds(files.slice(0, padPaths.length), onProgress);
+    for (let index = 0; index < uploaded.length; index++) {
+      await this.assignSound(uploaded[index].path, padPaths[index]);
+    }
+    return uploaded;
   }
 
   async listProjects() {
