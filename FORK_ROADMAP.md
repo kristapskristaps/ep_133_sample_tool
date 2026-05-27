@@ -27,6 +27,7 @@ Native device work has started behind that boundary:
 - `device/native-sysex` implements TE Sysex 7-bit packing/unpacking, request message construction, response parsing, and a request/response client.
 - `device/native-file-protocol` and `device/native-file-service` implement native TE file commands for initialization, paged listing, info, chunked get/put, metadata get/set including paged metadata, deletion, and playback.
 - `device/native-tree` and `device/native-device-service` implement native path/node caching plus project, group, pad, sound listing, metadata, pad assignment, playback, delete, and raw file download helpers.
+- The public `@/device` facade now exports the native-only engine. It does not fall back to the hidden legacy runtime; unsupported native actions report as unsupported instead of silently using legacy code.
 
 Current workspace flow:
 
@@ -130,6 +131,7 @@ System audio capture depends on the Chromium/WebRTC picker and host OS permissio
 - Done: add native Web MIDI discovery and TE Sysex request/response primitives.
 - Done: add native TE file protocol primitives and chunked get/put file service.
 - Done: add native path cache and high-level native device helpers for non-audio-conversion operations.
+- Done: switch the app facade to the native-only engine without legacy fallback.
 - Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
 - Replace the hidden compatibility engine with native React device-service modules.
 - Move kit upload, archive import/export, and sampler pad assignment onto the typed service.

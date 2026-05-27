@@ -1,4 +1,5 @@
 export type NativeMidiDevice = {
+  deviceId?: number;
   inputId?: string;
   outputId?: string;
   inputName?: string;
@@ -38,7 +39,7 @@ function likelyEpPort(name?: string | null) {
   return /EP|KO|K\.O|teenage|engineering/i.test(name || "");
 }
 
-function pairByName(inputs: MIDIInput[], outputs: MIDIOutput[], identities: Map<string, string>) {
+function pairByName(inputs: MIDIInput[], outputs: MIDIOutput[], identities: Map<string, { deviceId: number; sku: string }>) {
   const devices: NativeMidiDevice[] = [];
   const usedOutputs = new Set<string>();
 
@@ -55,7 +56,8 @@ function pairByName(inputs: MIDIInput[], outputs: MIDIOutput[], identities: Map<
         outputId: output?.id,
         inputName: input.name || undefined,
         outputName: output?.name || undefined,
-        sku: identities.get(input.id),
+        deviceId: identities.get(input.id)?.deviceId,
+        sku: identities.get(input.id)?.sku,
       });
     }
   }
@@ -73,7 +75,7 @@ export async function scanNativeMidi(): Promise<NativeMidiScan> {
   const access = await navigator.requestMIDIAccess({ sysex: true });
   const inputs = Array.from(access.inputs.values());
   const outputs = Array.from(access.outputs.values());
-  const identities = new Map<string, string>();
+  const identities = new Map<string, { deviceId: number; sku: string }>();
   const previousHandlers = new Map<string, ((event: MIDIMessageEvent) => void) | null>();
 
   await new Promise<void>((resolve) => {
@@ -84,7 +86,7 @@ export async function scanNativeMidi(): Promise<NativeMidiScan> {
         if (!event.data) return;
         const identity = parseIdentityResponse(event.data);
         if (identity) {
-          identities.set(input.id, identity.sku);
+          identities.set(input.id, identity);
           window.clearTimeout(timer);
           resolve();
         }

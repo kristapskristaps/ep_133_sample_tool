@@ -1,4 +1,4 @@
-export { DeviceEngineHost, useDeviceEngine } from "@/device/legacy-engine";
+export { DeviceEngineHost, useDeviceEngine } from "@/device/native-engine";
 export { groups, projects } from "@/device/constants";
 export * from "@/device/native-file-protocol";
 export { NativeDeviceService } from "@/device/native-device-service";
