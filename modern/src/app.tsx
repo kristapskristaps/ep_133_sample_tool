@@ -116,6 +116,7 @@ function SampleSettingsPanel({
         <SettingRow label="Ping-pong copy" detail="Render forward and reverse playback" checked={settings.pingPong} onCheckedChange={(checked) => update("pingPong", checked)} />
         <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={(checked) => update("lowCut", checked)} />
         <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={(checked) => update("highCut", checked)} />
+        <SettingRow label="Lo-Fi mode" detail={`${settings.lofiSampleRate || 22050} Hz, ${settings.lofiBitDepth || 12}-bit character`} checked={settings.lofi} onCheckedChange={(checked) => update("lofi", checked)} />
         <div className="grid grid-cols-2 gap-2">
           <label className="grid gap-1 text-xs text-muted-foreground">
             Output Hz
@@ -156,6 +157,14 @@ function SampleSettingsPanel({
           <label className="grid gap-1 text-xs text-muted-foreground">
             High cut Hz
             <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.highCutHz} onChange={(event) => update("highCutHz", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Lo-Fi Hz
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lofiSampleRate} onChange={(event) => update("lofiSampleRate", event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Lo-Fi bits
+            <input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lofiBitDepth} onChange={(event) => update("lofiBitDepth", event.target.value)} />
           </label>
         </div>
         <Button variant="outline" className="justify-start" onClick={() => setSettings(defaultSettings)}>

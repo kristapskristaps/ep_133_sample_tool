@@ -2,6 +2,28 @@ const DEVICE_SAMPLE_RATE = 46875;
 const DEVICE_AUDIO_FORMAT = "s16";
 const MAX_SAMPLE_SECONDS = 20;
 
+type NativeAudioOptions = {
+  sampleRate: number;
+  bitDepth: number;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function loadNativeAudioOptions(): NativeAudioOptions {
+  try {
+    const settings = JSON.parse(localStorage.getItem("ep133.offlineDsp") || "{}") as Record<string, unknown>;
+    const lofi = Boolean(settings.lofi);
+    return {
+      sampleRate: lofi ? clamp(Number(settings.lofiSampleRate) || 22050, 3000, DEVICE_SAMPLE_RATE) : DEVICE_SAMPLE_RATE,
+      bitDepth: lofi ? clamp(Number(settings.lofiBitDepth) || 12, 4, 16) : 16,
+    };
+  } catch {
+    return { sampleRate: DEVICE_SAMPLE_RATE, bitDepth: 16 };
+  }
+}
+
 function cleanName(name: string) {
   return name
     .replace(/\.[^.]+$/, "")
@@ -29,10 +51,10 @@ async function decode(file: File) {
   }
 }
 
-async function renderAtDeviceRate(buffer: AudioBuffer) {
+async function renderAtSampleRate(buffer: AudioBuffer, sampleRate: number) {
   const channels = Math.min(2, buffer.numberOfChannels);
-  const length = Math.max(1, Math.round(buffer.duration * DEVICE_SAMPLE_RATE));
-  const offline = new OfflineAudioContext(channels, length, DEVICE_SAMPLE_RATE);
+  const length = Math.max(1, Math.round(buffer.duration * sampleRate));
+  const offline = new OfflineAudioContext(channels, length, sampleRate);
   const source = offline.createBufferSource();
   source.buffer = buffer;
   source.connect(offline.destination);
@@ -40,14 +62,20 @@ async function renderAtDeviceRate(buffer: AudioBuffer) {
   return offline.startRendering();
 }
 
-function encodeS16Pcm(buffer: AudioBuffer) {
+function bitCrush(sample: number, bitDepth: number) {
+  if (bitDepth >= 16) return sample;
+  const steps = 2 ** bitDepth;
+  return Math.round(((sample + 1) / 2) * (steps - 1)) / (steps - 1) * 2 - 1;
+}
+
+function encodeS16Pcm(buffer: AudioBuffer, bitDepth: number) {
   const channels = Math.min(2, buffer.numberOfChannels);
   const bytes = new Uint8Array(buffer.length * channels * 2);
   const view = new DataView(bytes.buffer);
   let offset = 0;
   for (let frame = 0; frame < buffer.length; frame++) {
     for (let channel = 0; channel < channels; channel++) {
-      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[frame]));
+      const sample = bitCrush(Math.max(-1, Math.min(1, buffer.getChannelData(channel)[frame])), bitDepth);
       view.setInt16(offset, sample < 0 ? sample * 32768 : sample * 32767, true);
       offset += 2;
     }
@@ -59,8 +87,9 @@ export async function prepareNativeSoundFile(file: File) {
   const decoded = await decode(file);
   if (decoded.duration > MAX_SAMPLE_SECONDS) throw new Error("max sample length is 20 seconds");
   if (decoded.sampleRate < 3000 || decoded.sampleRate > 768000) throw new Error("invalid sample rate");
-  const rendered = await renderAtDeviceRate(decoded);
-  const { bytes, channels } = encodeS16Pcm(rendered);
+  const options = loadNativeAudioOptions();
+  const rendered = await renderAtSampleRate(decoded, options.sampleRate);
+  const { bytes, channels } = encodeS16Pcm(rendered, options.bitDepth);
   const name = cleanName(file.name);
   return {
     name,
@@ -68,7 +97,7 @@ export async function prepareNativeSoundFile(file: File) {
     metadata: {
       name,
       channels,
-      samplerate: DEVICE_SAMPLE_RATE,
+      samplerate: options.sampleRate,
       format: DEVICE_AUDIO_FORMAT,
       crc: crc32(bytes),
     },

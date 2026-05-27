@@ -8,8 +8,11 @@ export type SampleSettings = {
   pingPong: boolean;
   lowCut: boolean;
   highCut: boolean;
+  lofi: boolean;
   lowCutHz: string;
   highCutHz: string;
+  lofiSampleRate: string;
+  lofiBitDepth: string;
   gainDb: string;
   trimThresholdDb: string;
   fadeInMs: string;
@@ -30,8 +33,11 @@ export const defaultSettings: SampleSettings = {
   pingPong: false,
   lowCut: false,
   highCut: false,
+  lofi: false,
   lowCutHz: "35",
   highCutHz: "16000",
+  lofiSampleRate: "22050",
+  lofiBitDepth: "12",
   gainDb: "0",
   trimThresholdDb: "-55",
   fadeInMs: "0",
@@ -58,6 +64,9 @@ export function syncOfflineDspSettings(settings: SampleSettings) {
     mono: settings.mono,
     lowCutHz: settings.lowCut ? Number(settings.lowCutHz) || 35 : "",
     highCutHz: settings.highCut ? Number(settings.highCutHz) || 16000 : "",
+    lofi: settings.lofi,
+    lofiSampleRate: settings.lofi ? Number(settings.lofiSampleRate) || 22050 : "",
+    lofiBitDepth: settings.lofi ? Number(settings.lofiBitDepth) || 12 : "",
     targetSampleRate: Number(settings.targetSampleRate) || 46875,
     sourceBpm: settings.sourceBpm,
     targetBpm: settings.targetBpm,
@@ -83,8 +92,11 @@ export function loadInitialSampleSettings(): SampleSettings {
       pingPong: typeof stored.pingPongCopy === "boolean" ? stored.pingPongCopy : defaultSettings.pingPong,
       lowCut: Number(stored.lowCutHz) > 0,
       highCut: Number(stored.highCutHz) > 0,
+      lofi: typeof stored.lofi === "boolean" ? stored.lofi : defaultSettings.lofi,
       lowCutHz: stored.lowCutHz ? String(stored.lowCutHz) : defaultSettings.lowCutHz,
       highCutHz: stored.highCutHz ? String(stored.highCutHz) : defaultSettings.highCutHz,
+      lofiSampleRate: stored.lofiSampleRate != null ? String(stored.lofiSampleRate) : defaultSettings.lofiSampleRate,
+      lofiBitDepth: stored.lofiBitDepth != null ? String(stored.lofiBitDepth) : defaultSettings.lofiBitDepth,
       gainDb: stored.gainDb != null ? String(stored.gainDb) : defaultSettings.gainDb,
       trimThresholdDb: stored.trimThresholdDb != null ? String(stored.trimThresholdDb) : defaultSettings.trimThresholdDb,
       fadeInMs: stored.fadeInMs != null ? String(stored.fadeInMs) : defaultSettings.fadeInMs,
