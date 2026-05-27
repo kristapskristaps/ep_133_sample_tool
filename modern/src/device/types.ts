@@ -94,3 +94,22 @@ export type EngineState = {
   sounds: Sound[];
   memoryUsedPercent: number;
 };
+
+export type DeviceActions = {
+  connect: () => void | Promise<void>;
+  refresh: () => void | Promise<void>;
+  setProject: (project: string) => void | Promise<void>;
+  setGroup: (group: string) => void | Promise<void>;
+  uploadToPads: (files: File[], pads: Pad[]) => void | Promise<void>;
+  uploadSamples: (files: File[]) => void | Promise<void>;
+  playSound: (sound?: Sound) => void | Promise<void>;
+  deleteSound: (sound?: Sound) => void | Promise<void>;
+  downloadSound: (sound?: Sound) => void | Promise<void>;
+  playPad: (pad?: Pad) => void | Promise<void>;
+  clearPad: (pad?: Pad) => void | Promise<void>;
+  downloadPad: (pad?: Pad) => void | Promise<void>;
+  exportKit: () => void | Promise<void>;
+  importKit: (file: File) => void | Promise<void>;
+};
+
+export type DeviceEngine = EngineState & DeviceActions;
