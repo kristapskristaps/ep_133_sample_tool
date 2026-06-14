@@ -230,10 +230,6 @@ export function useDeviceEngine(): DeviceEngine {
     }
   }, [refreshNative]);
 
-  const unsupported = useCallback((feature: string) => {
-    setState((current) => ({ ...current, status: `${feature} is not implemented in the native engine yet` }));
-  }, []);
-
   return useMemo(() => ({
     ...state,
     sounds: state.sounds.map((sound) => ({ ...sound, usageProjects: usageMap[sound.id] || [] })),
@@ -280,6 +276,17 @@ export function useDeviceEngine(): DeviceEngine {
       const wav = await service.downloadWav(sound.path);
       downloadBlob(wav, `${String(sound.id).padStart(3, "0")} ${sound.name || "sample"}.wav`);
     }),
+    loadSoundWav: async (sound?: Sound) => {
+      const service = serviceRef.current;
+      if (!service || !sound?.path) return null;
+      try {
+        return await service.downloadWav(sound.path);
+      } catch (error) {
+        console.error(error);
+        setState((current) => ({ ...current, status: error instanceof Error ? error.message : "Native WAV preview failed" }));
+        return null;
+      }
+    },
     playPad: (pad?: Pad) => runNative(async (service) => {
       if (pad?.assignedPath) await service.playback(pad.assignedPath, true);
     }),
@@ -292,7 +299,21 @@ export function useDeviceEngine(): DeviceEngine {
       const wav = await service.downloadWav(pad.assignedPath);
       downloadBlob(wav, `${shortPath(pad.assignedPath) || "pad"}.wav`);
     }),
-    exportKit: () => unsupported("Native kit export"),
-    importKit: () => unsupported("Native kit import"),
-  }), [connect, refreshNative, runNative, state, unsupported, usageMap]);
+    exportKit: () => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: "Exporting active kit" }));
+      const archive = await service.exportActiveKitArchive((label, current, total) => {
+        const percent = total ? ` ${Math.round((current / total) * 100)}%` : "";
+        setState((existing) => ({ ...existing, uploading: true, status: `Exporting ${label}${percent}` }));
+      });
+      downloadBlob(archive.blob, archive.filename);
+      setState((current) => ({ ...current, uploading: false, status: `Exported ${archive.manifest.pads.length} kit sample${archive.manifest.pads.length === 1 ? "" : "s"}` }));
+    }),
+    importKit: (file: File) => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: `Importing ${file.name}` }));
+      const result = await service.importActiveKitArchive(file, (label, current, total) => {
+        setState((existing) => ({ ...existing, uploading: true, status: `Importing ${label}: ${Math.round((current / Math.max(1, total)) * 100)}%` }));
+      });
+      setState((current) => ({ ...current, uploading: false, status: `Imported ${result.imported} kit sample${result.imported === 1 ? "" : "s"}` }));
+    }),
+  }), [connect, refreshNative, runNative, state, usageMap]);
 }

@@ -2,170 +2,254 @@
 
 Fork: https://github.com/kristapskristaps/ep_133_sample_tool
 
-## Implemented first
+Last refreshed: 2026-06-14
 
-### Modern React shell
+## Current State
 
-The fork now includes a modern React/Vite/Tailwind workspace in `modern/`.
+This fork has moved away from the original bundled UI. The app is now a modern React/Vite/Tailwind interface in `modern/`, loaded by Electron through `modern/dist`.
 
-The modern shell is the new primary UI direction:
+The old `data/` legacy app bundle and the modern legacy bridge files were removed. The public `@/device` facade exports the native engine only. There is no hidden legacy runtime and no silent fallback to the original app.
 
-- A utilitarian app frame with persistent left navigation.
-- Two main workspaces: a pad-centric Project view and a device-wide Library view.
-- Integrated dark mode with persisted theme preference.
-- Shared visual tokens for buttons, panels, pads, tabs, and status surfaces.
-- A production build path through `npm run modern:build`.
-- Electron loads `modern/dist/index.html` when it exists, falling back to the original app if the modern build has not been generated.
+If `modern/dist/index.html` is missing, Electron now fails clearly and asks for `npm run modern:build` instead of falling back to legacy UI.
 
-The hardware runtime is currently bridged through the original TE bundle mounted into a hidden same-window root. This keeps connection, transfer, and backup behavior available while the minified TE device service is gradually extracted into typed modules. The original app is no longer presented as a user-facing tab or panel in the modern UI.
+## Implemented
 
-The modern UI now talks to typed `device` and `dsp` modules instead of reaching into `window.ep133KitBridge` directly. The current `device/legacy-engine` hook owns React polling/autoconnect state, while `device/legacy-adapter` owns every legacy bridge operation. That adapter is now the replaceable boundary for native device-service extraction.
+### Modern App Shell
 
-Native device work has started behind that boundary:
+- React/Vite/Tailwind app in `modern/`.
+- Two primary views: `Project` and `Library`.
+- Centered Project/Library pill tabs in the header.
+- Dark mode with persisted theme preference.
+- Header memory display.
+- Connect button with red/yellow/green status dot.
+- Auto-connect attempt on app load.
+- Full-screen connection gate overlay when no EP device is connected.
+- Blurred/disabled workspace behind the connection overlay.
 
-- `device/native-midi` requests Web MIDI/Sysex permission, sends the standard MIDI identity request, parses TE manufacturer identity responses, and pairs EP input/output ports.
-- `device/native-sysex` implements TE Sysex 7-bit packing/unpacking, request message construction, response parsing, and a request/response client.
-- `device/native-file-protocol` and `device/native-file-service` implement native TE file commands for initialization, paged listing, info, chunked get/put, metadata get/set including paged metadata, deletion, and playback.
-- `device/native-tree` and `device/native-device-service` implement native path/node caching plus project, group, pad, sound listing, metadata, pad assignment, playback, delete, and raw file download helpers.
-- The public `@/device` facade now exports the native-only engine. It does not fall back to the hidden legacy runtime; unsupported native actions report as unsupported instead of silently using legacy code.
-- Native audio upload now decodes browser-supported audio, renders 46.875 kHz 16-bit PCM, writes sound metadata, uploads to library slots, and assigns uploaded sounds to target pads. Native downloads wrap device PCM back into WAV files.
-- Lo-Fi mode can intentionally lower upload sample rate and bit-crush the signal before native transfer.
-- Library view renders all 999 addressable sound slots. Dropping on an empty slot uploads there; dropping on an occupied slot asks before replacing.
+### Native Device Engine
 
-Current workspace flow:
+- Web MIDI/SysEx permission request.
+- TE MIDI identity request parsing.
+- EP input/output MIDI port pairing.
+- Native TE SysEx request/response client with 7-bit pack/unpack helpers.
+- Native TE file protocol support for:
+  - init
+  - file listing
+  - file info
+  - metadata get/set, including paged metadata
+  - chunked file get/put
+  - delete
+  - playback
+- Native path/tree cache for device nodes.
+- Native service helpers for:
+  - active project
+  - active group
+  - active pads
+  - pad assignment
+  - pad clearing
+  - project pad metadata scanning
+  - sound listing
+  - playback
+  - delete
+  - raw download
+  - WAV download wrapping
+- Model/storage inference:
+  - EP-133 defaults to 64 MB.
+  - EP-40 and EP-1320 use 128 MB.
+  - Devices already using more than 64 MB are displayed as 128 MB capacity.
 
-- Select the active project and group.
-- Click a pad to inspect and act on it.
-- Upload audio directly to the selected pad or drop audio onto the pad.
-- Open a sampling/chopping modal from the selected pad.
-- Apply transfer DSP from the same workspace through `Sample Settings`.
-- Import, export, and inspect the active kit from the main view.
-- Switch to the Library view to manage device memory and samples by 100-slot ranges.
-- Search all loaded samples while preserving the original 0-99, 100-199, 200-299 style grouping and bank filters.
-- See whether a sample is used by projects such as project 5, 7, or 9 when project pad metadata is available from the connected device.
+### Project View
 
-### Legacy feature sidebar
+- Select project `01-09`.
+- Select group `A-D`.
+- View 12 pads for the active group.
+- Select a pad and inspect its current assignment.
+- Drop audio on a pad to upload and assign it.
+- Upload audio to the selected pad.
+- Play assigned pad sample.
+- Download assigned pad sample as WAV.
+- Clear pad assignment.
+- Open sampler/chopper modal for the selected pad.
+- Inspect active kit assignment count.
 
-The earlier fork work added a right-side `EP Tools` sidebar loaded from `data/feature-sidebar.js` and `data/feature-sidebar.css`.
+### Library View
 
-The sidebar owns the visual shell and tab navigation for the added tools:
+- Renders all 999 addressable sound slots.
+- Keeps the original 100-slot bank separation: `0-99`, `100-199`, etc.
+- Search works across slot id, sample name, path, and project usage.
+- Upload to next free library slot.
+- Drag/drop onto an empty slot to upload there.
+- Drag/drop onto an occupied slot asks for replacement confirmation.
+- Sample names prefer device metadata instead of raw `.pcm` filenames.
+- Hover/focus actions on occupied slots:
+  - play
+  - download WAV
+  - delete
+- Shows whether samples are referenced by projects when project pad metadata is available.
+- Click a filled slot to load an on-demand waveform preview in the Library detail panel.
+- Waveform previews are cached in memory for the current session.
 
-- `DSP`
-- `Sample`
-- `Kit`
+### Native Kit Archives
 
-Feature modules register their content into this sidebar instead of creating separate floating panels or bottom drawers.
+- Export the active project/group as a ZIP archive.
+- Archive contains a `kit.json` manifest plus one WAV per assigned pad.
+- Import ZIP archives created by this fork.
+- Import uploads archived WAVs to the active target and restores pad assignments by pad number.
+- ZIP handling is dependency-free and currently writes/reads stored, uncompressed ZIP entries.
 
-### Offline DSP on transfer
+Limitations:
 
-The fork adds browser-side DSP controls that are now surfaced in the modern workspace as `Sample Settings`.
+- Import is designed for archives exported by this fork.
+- Deflated/compressed third-party ZIP archives are not supported yet.
 
-Current transfer-time processing:
+### Local Snapshots
 
-- Enable or bypass transfer-time DSP from the modern Project view.
-- Peak normalize dropped audio before upload.
-- Set the normalize target in dBFS.
-- Trim leading and trailing silence with an adjustable threshold.
-- Add fade-in and fade-out ramps.
-- Mix stereo/multichannel files down to mono.
-- Resample output to a target sample rate, defaulting to the EP device rate.
-- Apply simple low-cut and high-cut filters with editable cutoff frequencies.
-- Apply a gain trim after normalization.
-- Generate optional reversed copies next to the original file.
-- Generate optional ping-pong copies.
-- Conform loops from a source BPM to a target BPM with Web Audio resampling.
-- Prefix obvious filenames with kit tags like `kick_`, `snare_`, `cymb_`, `perc_`, `bass_`, `loop_`, and `sfx_`.
+- Save a local snapshot for the active target.
+- Snapshot captures active target, current pad assignments, and current library sample ids/names.
+- Compare against the previous snapshot for the same target.
+- Report changed pad count plus added/removed sample counts.
+- Store the latest 50 snapshots in browser local storage.
 
-The implementation captures file drops before the bundled TE React app handles them, converts audio files into new WAV `File` objects, then replays the drop event. Modern Library uploads and Project pad/kit uploads also call the same DSP processor directly through the bridge. This keeps most of the upstream bundle untouched; a small bridge is patched into the bundle for kit/device integration.
+Limitations:
 
-Still missing for a full DSP workstation:
+- This is not a full TE project backup.
+- Pattern/sequence data is not included yet.
+- There is no timeline browser or rollback UI yet.
 
-- Rubber Band or similar high-quality time-stretch that preserves pitch.
-- Dedicated pitch-shift in semitones/cents.
-- Multi-band EQ and dynamics instead of the current simple filters and gain stage.
-- Waveform preview with before/after audition.
-- Batch presets and per-folder processing profiles.
+### Transfer DSP
 
-### Kit inspector and quick kit upload
+DSP settings are surfaced as `Sample Settings` in the Project view and are applied before native upload.
 
-The fork adds a kit inspector that is now represented by the main modern workspace.
+Implemented processing:
 
-Current kit workflow:
+- Enable/bypass DSP.
+- Peak normalize.
+- Target dBFS.
+- Trim leading/trailing silence.
+- Fade in/out.
+- Mono mixdown.
+- Output sample rate.
+- Gain trim.
+- Low-cut filter.
+- High-cut filter.
+- Reverse copy.
+- Ping-pong copy.
+- Source BPM to target BPM conforming through browser resampling.
+- Filename auto-tagging.
+- Lo-Fi mode with configurable sample rate and bit depth.
 
-- See the active project, active group, and all 12 pads in that group.
-- See which sound id/path is assigned to each pad.
-- Resolve assigned sound names from the device when available.
-- Switch projects 01-09 and groups A-D.
-- Drop one sample on a pad to upload and assign it.
-- Drop a folder or batch of up to 12 audio files on the kit drop zone to auto-sort and assign pads.
-- Play, download as WAV, or clear an assigned pad.
-- Browse loaded samples in the Library view, see memory usage, search across all sample banks, preview, download WAVs, and delete samples.
-- Keep the original 100-sample bank separation and selectable bank filters while still filtering search results across every bank.
-- Show project usage labels for sounds referenced by project pad assignments.
-- Export the active group as a kit archive ZIP containing assigned pad WAV files and a `kit.json` manifest.
-- Import a kit archive ZIP exported by this fork and restore its samples to the matching active-group pads.
+Limitations:
 
-The inspector uses a small bridge inserted into the bundled app so it can call the app's existing uploader and device service instead of reimplementing Sysex operations.
+- BPM conforming currently changes pitch because it uses browser resampling.
+- No Rubber Band/high-quality pitch-preserving time-stretch yet.
+- No dedicated semitone/cents pitch shift yet.
+- No multiband EQ or dynamics yet.
+- No before/after waveform audition yet.
 
-### Sampler mode
+### Sampler Mode
 
-The fork adds sampler mode, now opened as a selected-pad modal from the workspace.
+Sampler mode opens as a modal from the selected pad.
 
-Current sampler workflow:
+Implemented:
 
-- Capture shared system/tab audio when the browser/Electron runtime exposes it through screen sharing.
-- Capture microphone audio as a fallback.
-- Load an existing local audio file for slicing.
-- Draw a waveform preview in the browser.
+- Capture shared system/tab audio when Chromium and OS permissions allow it.
+- Capture microphone audio.
+- Load a local audio file.
+- Draw a waveform for the loaded/recorded audio.
 - Add manual chop markers by clicking the waveform.
-- Generate equal 4, 8, or 12-way chops.
-- Suggest transient chops with simple amplitude-onset detection.
+- Drag chop markers to adjust slice boundaries.
+- Generate 4, 8, or 12 equal chops.
+- Basic transient chop suggestion from amplitude onsets.
+- Audition individual slices before assignment.
 - Render chops as WAV files.
-- Assign rendered chops directly to active pads starting from a chosen pad.
+- Assign rendered chops to pads starting from the selected pad.
 
-System audio capture depends on the Chromium/WebRTC picker and host OS permissions. On some systems the user must choose a tab/window/screen with audio sharing enabled; on others only microphone capture may be available.
+Limitations:
 
-## Next feature slices
+- System audio capture depends on the OS and Chromium picker.
+- No zoom/trim handles yet.
 
-### Device service extraction
+## Not Complete Yet
 
-- Done: isolate the hidden compatibility runtime behind typed modern `device` and `dsp` modules.
-- Done: move legacy bridge operations behind a `device/legacy-adapter` service boundary.
-- Done: add native Web MIDI discovery and TE Sysex request/response primitives.
-- Done: add native TE file protocol primitives and chunked get/put file service.
-- Done: add native path cache and high-level native device helpers for non-audio-conversion operations.
-- Done: switch the app facade to the native-only engine without legacy fallback.
-- Done: add native audio upload for library and pad assignment plus native WAV download wrapping.
-- Extract the original device connection, sample transfer, and project backup calls from the bundled runtime into a typed service API.
-- Replace the hidden compatibility engine with native React device-service modules.
-- Move kit upload, archive import/export, and sampler pad assignment onto the typed service.
-- Keep the legacy app as an optional troubleshooting fallback until the native service is feature complete.
+### Full Project Backup / Pattern Diff
 
-### High-quality pitch and time processing
+Not implemented.
 
-The current BPM conforming is Web Audio resampling, so it changes pitch. For production-quality time-stretching, add a local processing service:
+Needed:
 
-- FastAPI endpoint for dropped audio files.
-- `rubberband` CLI or library integration for time-stretch and pitch-shift.
-- `ffmpeg` fallback for format conversion.
-- Renderer integration through the same `data/dsp.js` drop interception layer.
+- Full project backup pull.
+- Timestamped backup storage outside browser local storage.
+- Device/project metadata index.
+- Hash comparison between snapshots.
+- Diff view for patterns, sequences, and full project metadata.
+- Rollback/restore UI.
 
-### Kit builder
+### Advanced Audio Processing
 
-- Add an editable pad assignment preview before upload.
-- Add per-pad choke and MIDI-related metadata controls once the relevant device metadata is confirmed.
-- Add save/load kit templates.
+Not implemented.
 
-### Sample chopping
+Needed:
 
-- Improve marker editing with draggable markers and per-slice audition.
-- Add zoom and trim handles.
-- Add beat-grid chopping from BPM.
-- Add per-slice naming before upload.
+- Rubber Band or equivalent for pitch-preserving time-stretch.
+- Pitch shift in semitones/cents.
+- Better filters/EQ.
+- Dynamics/limiting.
+- Batch presets.
 
-### Snapshot timeline
+### Hardware Regression Pass
 
-- Wrap the existing local backup flow.
-- Save timestamped backup files under an app-owned snapshots directory.
-- Store lightweight metadata for project number, device serial, and changed file hashes.
-- Add a diff view for sample and project archive changes.
+Still needed on real devices:
+
+- EP-133 64 MB.
+- EP-133 128 MB variant, if available.
+- EP-40.
+- EP-1320, if available.
+
+Test paths:
+
+- Autoconnect and MIDI/SysEx permission.
+- Project/group switching.
+- Pad upload and assignment.
+- Library slot upload.
+- Occupied-slot replace confirmation.
+- Playback.
+- WAV download.
+- Delete sample.
+- Pad clear.
+- DSP upload variants.
+- Sampler capture and chop assignment.
+
+## How To Run
+
+Browser dev server:
+
+```bash
+npm run modern:dev
+```
+
+Open the shown Vite URL, usually:
+
+```text
+http://localhost:5173
+```
+
+Electron against the dev server:
+
+```bash
+npm run modern:electron
+```
+
+Production-style Electron run:
+
+```bash
+npm run modern:build
+npm start
+```
+
+## Immediate Next Slices
+
+1. Add deflated ZIP import support or switch to a vetted ZIP library.
+2. Add full Project backup, timeline browsing, and rollback.
+3. Add high-quality pitch-preserving time-stretch/pitch-shift.
+4. Add sampler zoom, trim handles, beat-grid chopping, and per-slice naming.
+5. Add hardware regression checklist results to this file.

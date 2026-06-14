@@ -106,6 +106,7 @@ export type DeviceActions = {
   playSound: (sound?: Sound) => void | Promise<void>;
   deleteSound: (sound?: Sound) => void | Promise<void>;
   downloadSound: (sound?: Sound) => void | Promise<void>;
+  loadSoundWav: (sound?: Sound) => Promise<Blob | null>;
   playPad: (pad?: Pad) => void | Promise<void>;
   clearPad: (pad?: Pad) => void | Promise<void>;
   downloadPad: (pad?: Pad) => void | Promise<void>;

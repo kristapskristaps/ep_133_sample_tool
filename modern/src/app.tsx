@@ -224,6 +224,7 @@ function SampleModal({
   const [source, setSource] = useState<"system" | "mic">("system");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [markers, setMarkers] = useState<number[]>([]);
+  const [draggingMarker, setDraggingMarker] = useState<number | null>(null);
   const [status, setStatus] = useState("Load or record audio");
   const [recording, setRecording] = useState(false);
 
@@ -366,14 +367,48 @@ function SampleModal({
     recorderRef.current?.state === "recording" ? recorderRef.current.stop() : undefined;
   }
 
-  function addMarker(event: React.MouseEvent<HTMLCanvasElement>) {
-    if (!audioBuffer || !canvasRef.current) return;
+  function markerFromEvent(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!canvasRef.current) return 0;
     const rect = canvasRef.current.getBoundingClientRect();
-    const marker = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    if (marker <= 0.01 || marker >= 0.99) return;
-    const next = [...new Set([...markers, Number(marker.toFixed(4))])].sort((a, b) => a - b).slice(0, 11);
+    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  }
+
+  function nearestMarkerIndex(position: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return -1;
+    const width = Math.max(1, canvas.getBoundingClientRect().width);
+    return markers.findIndex((marker) => Math.abs(marker - position) * width <= 12);
+  }
+
+  function pointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!audioBuffer || !canvasRef.current) return;
+    const marker = markerFromEvent(event);
+    const nearest = nearestMarkerIndex(marker);
+    canvasRef.current.setPointerCapture(event.pointerId);
+    if (nearest >= 0) {
+      setDraggingMarker(nearest);
+      setStatus(`Dragging marker ${nearest + 1}`);
+      return;
+    }
+    if (marker <= 0.01 || marker >= 0.99 || markers.length >= 11) return;
+    const next = [...markers, Number(marker.toFixed(4))].sort((a, b) => a - b);
     setMarkers(next);
-    setStatus(`${next.length + 1} chop${next.length ? "s" : ""}`);
+    setDraggingMarker(next.findIndex((candidate) => candidate === Number(marker.toFixed(4))));
+    setStatus(`${next.length + 1} chops`);
+  }
+
+  function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!audioBuffer || draggingMarker == null) return;
+    const previous = markers[draggingMarker - 1] ?? 0;
+    const next = markers[draggingMarker + 1] ?? 1;
+    const marker = Math.max(previous + 0.005, Math.min(next - 0.005, markerFromEvent(event)));
+    setMarkers((current) => current.map((candidate, index) => index === draggingMarker ? Number(marker.toFixed(4)) : candidate));
+  }
+
+  function pointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
+    canvasRef.current?.releasePointerCapture(event.pointerId);
+    if (draggingMarker != null) setStatus(`${markers.length + 1} chops`);
+    setDraggingMarker(null);
   }
 
   function equalChops(count: number) {
@@ -408,7 +443,7 @@ function SampleModal({
     setStatus(`${Math.min(next.length, 11) + 1} transient chops`);
   }
 
-  function play() {
+  function play(start = 0, duration?: number) {
     if (!audioBuffer) return;
     stopPlayback();
     const context = new AudioContext();
@@ -419,7 +454,7 @@ function SampleModal({
       void context.close();
       playbackRef.current = null;
     });
-    sourceNode.start();
+    sourceNode.start(0, start, duration);
     playbackRef.current = { context, source: sourceNode };
   }
 
@@ -484,6 +519,14 @@ function SampleModal({
     onUpload(files, Number(pad?.number || 1));
   }
 
+  const slicePoints = [0, ...markers, 1].sort((a, b) => a - b);
+  const slices = slicePoints.slice(0, -1).map((start, index) => ({
+    index,
+    start,
+    end: slicePoints[index + 1],
+    duration: audioBuffer ? (slicePoints[index + 1] - start) * audioBuffer.duration : 0,
+  }));
+
   if (!open) return null;
 
   return (
@@ -501,7 +544,7 @@ function SampleModal({
               <Button onClick={recording ? stopRecording : startRecording}><Mic2 className="h-4 w-4" /> {recording ? "Stop" : "Record"}</Button>
               <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
               <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect chops</Button>
-              <Button variant="outline" onClick={play}>Play</Button>
+              <Button variant="outline" onClick={() => play()}>Play</Button>
               <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
               <input
                 ref={fileInput}
@@ -515,7 +558,14 @@ function SampleModal({
                 }}
               />
             </div>
-            <canvas ref={canvasRef} onClick={addMarker} className="h-72 w-full rounded-lg border bg-zinc-950" />
+            <canvas
+              ref={canvasRef}
+              onPointerDown={pointerDown}
+              onPointerMove={pointerMove}
+              onPointerUp={pointerUp}
+              onPointerCancel={pointerUp}
+              className="h-72 w-full touch-none rounded-lg border bg-zinc-950"
+            />
             <div className="text-sm text-muted-foreground">{status}</div>
           </div>
           <div className="grid content-start gap-3">
@@ -523,8 +573,21 @@ function SampleModal({
             <Button variant="outline" className="justify-start" onClick={() => equalChops(8)}><Scissors className="h-4 w-4" /> 8 equal chops</Button>
             <Button variant="outline" className="justify-start" onClick={() => equalChops(12)}><Scissors className="h-4 w-4" /> 12 equal chops</Button>
             <Button variant="outline" className="justify-start" onClick={() => setMarkers([])}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
+            <div className="grid max-h-44 gap-2 overflow-auto rounded-lg border bg-muted/25 p-2">
+              {slices.map((slice) => (
+                <button
+                  key={`${slice.start}-${slice.end}`}
+                  className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs hover:border-primary"
+                  onClick={() => play(slice.start * (audioBuffer?.duration || 0), slice.duration)}
+                  disabled={!audioBuffer}
+                >
+                  <span>Slice {String(slice.index + 1).padStart(2, "0")}</span>
+                  <span className="text-muted-foreground">{slice.duration.toFixed(2)}s</span>
+                </button>
+              ))}
+            </div>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-              Chops are staged for the selected project/group target. The upload action assigns the rendered files starting at pad {Number(pad?.number || 1)}.
+              Click to add markers, drag markers to adjust, and click a slice to audition it before assigning from pad {Number(pad?.number || 1)}.
             </div>
           </div>
         </div>
@@ -542,6 +605,7 @@ function SampleManager({
   const [query, setQuery] = useState("");
   const [bank, setBank] = useState<"all" | string>("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [waveforms, setWaveforms] = useState<Record<number, { peaks: number[]; status: string }>>({});
   const soundById = new Map(engine.sounds.map((sound) => [sound.id, sound]));
   const slots = Array.from({ length: 999 }, (_, index) => {
     const id = index + 1;
@@ -567,7 +631,7 @@ function SampleManager({
     const start = Math.floor((slot.id - 1) / 100) * 100;
     return `${start}-${start + 99}` === bank;
   });
-  const selected = (selectedId ? soundById.get(selectedId) : undefined) || visibleSlots.find((slot) => slot.sound)?.sound;
+  const selected = selectedId ? soundById.get(selectedId) : undefined;
   const groupedSlots = visibleSlots.reduce<Record<string, Array<{ id: number; sound?: Sound }>>>((groupsByHundred, slot) => {
     const start = Math.floor((slot.id - 1) / 100) * 100;
     const range = `${start}-${start + 99}`;
@@ -594,6 +658,45 @@ function SampleManager({
   const selectSlot = (slotId: number) => {
     setSelectedId(slotId);
   };
+
+  useEffect(() => {
+    if (!selected || waveforms[selected.id]) return;
+    let cancelled = false;
+    setWaveforms((current) => ({ ...current, [selected.id]: { peaks: [], status: "Loading waveform" } }));
+    void (async () => {
+      const blob = await engine.loadSoundWav(selected);
+      if (!blob || cancelled) {
+        if (!cancelled) setWaveforms((current) => ({ ...current, [selected.id]: { peaks: [], status: "Waveform unavailable" } }));
+        return;
+      }
+      const context = new AudioContext();
+      try {
+        const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+        const data = buffer.getChannelData(0);
+        const buckets = 96;
+        const step = Math.max(1, Math.floor(data.length / buckets));
+        const peaks = Array.from({ length: buckets }, (_, bucket) => {
+          let peak = 0;
+          const start = bucket * step;
+          for (let index = 0; index < step && start + index < data.length; index++) {
+            peak = Math.max(peak, Math.abs(data[start + index]));
+          }
+          return Number(peak.toFixed(3));
+        });
+        if (!cancelled) setWaveforms((current) => ({ ...current, [selected.id]: { peaks, status: `${buffer.duration.toFixed(2)}s preview` } }));
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) setWaveforms((current) => ({ ...current, [selected.id]: { peaks: [], status: "Waveform decode failed" } }));
+      } finally {
+        await context.close();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engine, selected, waveforms]);
+
+  const waveform = selected ? waveforms[selected.id] : undefined;
 
   return (
     <Card className="min-h-[calc(100vh-260px)]">
@@ -746,18 +849,34 @@ function SampleManager({
             </div>
           )}
         </div>
-        <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/35 p-3">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{selected ? `${String(selected.id).padStart(3, "0")} ${selected.name}` : "No sample selected"}</div>
-            <div className="text-xs text-muted-foreground">
-              {selected?.usageProjects?.length ? `Used in project ${selected.usageProjects.map((project) => Number(project)).join(", ")}` : "No project usage detected"}
+        <div className="grid gap-3 rounded-lg border bg-muted/35 p-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="grid min-w-0 gap-3">
+            <div>
+              <div className="truncate text-sm font-medium">{selected ? `${String(selected.id).padStart(3, "0")} ${selected.name}` : "Select a sample for preview"}</div>
+              <div className="text-xs text-muted-foreground">
+                {selected?.usageProjects?.length ? `Used in project ${selected.usageProjects.map((project) => Number(project)).join(", ")}` : selected ? "No project usage detected" : "Waveforms load on demand and are cached for this session."}
+              </div>
             </div>
+            <div className="flex h-20 items-center gap-px overflow-hidden rounded-md border bg-background px-2">
+              {selected && waveform?.peaks.length ? waveform.peaks.map((peak, index) => (
+                <span
+                  key={`${selected.id}-${index}`}
+                  className="w-full rounded-full bg-primary/75"
+                  style={{ height: `${Math.max(8, peak * 100)}%` }}
+                />
+              )) : (
+                <div className="w-full text-center text-xs text-muted-foreground">{selected ? waveform?.status || "Preparing preview" : "No sample selected"}</div>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">{selected ? waveform?.status || "Preparing preview" : "Click a filled slot to preview its waveform."}</div>
           </div>
-          <Button size="sm" variant="outline" onClick={() => engine.playSound(selected)} disabled={!selected}>Play</Button>
-          <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>
-            <Download className="h-4 w-4" /> Download WAV
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => engine.deleteSound(selected)} disabled={!selected}>Delete</Button>
+          <div className="flex flex-wrap content-start gap-2">
+            <Button size="sm" variant="outline" onClick={() => engine.playSound(selected)} disabled={!selected}>Play</Button>
+            <Button size="sm" variant="outline" onClick={() => engine.downloadSound(selected)} disabled={!selected}>
+              <Download className="h-4 w-4" /> Download WAV
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => engine.deleteSound(selected)} disabled={!selected}>Delete</Button>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -792,6 +911,38 @@ function Workspace({
     [engine],
   );
 
+  const saveSnapshot = () => {
+    const key = "ep-modern-snapshots";
+    type Snapshot = {
+      id: string;
+      createdAt: string;
+      target: string;
+      pads: Array<{ number: string; name: string; type: string; assignedPath?: string }>;
+      sounds: Array<{ id: number; name: string; path?: string }>;
+    };
+    const existing = JSON.parse(localStorage.getItem(key) || "[]") as Snapshot[];
+    const snapshot: Snapshot = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      target: engine.target,
+      pads: engine.pads.map((pad) => ({ number: pad.number, name: pad.name, type: pad.type, assignedPath: pad.assignedPath })),
+      sounds: engine.sounds.map((sound) => ({ id: sound.id, name: sound.name, path: sound.path })),
+    };
+    const previous = existing.find((candidate) => candidate.target === snapshot.target);
+    const changedPads = previous
+      ? snapshot.pads.filter((pad) => {
+        const before = previous.pads.find((candidate) => candidate.number === pad.number);
+        return before?.assignedPath !== pad.assignedPath || before?.name !== pad.name;
+      }).length
+      : snapshot.pads.filter((pad) => pad.assignedPath).length;
+    const previousSounds = new Set((previous?.sounds || []).map((sound) => sound.id));
+    const currentSounds = new Set(snapshot.sounds.map((sound) => sound.id));
+    const addedSounds = snapshot.sounds.filter((sound) => !previousSounds.has(sound.id)).length;
+    const removedSounds = previous ? previous.sounds.filter((sound) => !currentSounds.has(sound.id)).length : 0;
+    localStorage.setItem(key, JSON.stringify([snapshot, ...existing].slice(0, 50)));
+    setArchiveNote(`Snapshot saved: ${changedPads} pad change${changedPads === 1 ? "" : "s"}, ${addedSounds} added sample${addedSounds === 1 ? "" : "s"}, ${removedSounds} removed sample${removedSounds === 1 ? "" : "s"}.`);
+  };
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card>
@@ -818,6 +969,9 @@ function Workspace({
                 onClick={() => setArchiveNote(`${engine.target}: ${engine.pads.filter((pad) => pad.assignedPath).length} assigned pad${engine.pads.filter((pad) => pad.assignedPath).length === 1 ? "" : "s"}`)}
               >
                 <Search className="h-4 w-4" /> Inspect
+              </Button>
+              <Button variant="outline" onClick={saveSnapshot} disabled={!engine.connected}>
+                <CheckCircle2 className="h-4 w-4" /> Snapshot
               </Button>
               <Button onClick={engine.exportKit} disabled={!engine.connected}>
                 <Download className="h-4 w-4" /> Export

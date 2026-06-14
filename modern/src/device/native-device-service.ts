@@ -3,6 +3,7 @@ import { createWavFromNativePcm, prepareNativeSoundFile } from "@/device/native-
 import { TE_FILE } from "@/device/native-file-protocol";
 import { NativeFileService } from "@/device/native-file-service";
 import { NativeTreeCache, type NativeNode } from "@/device/native-tree";
+import { createStoredZip, readJsonEntry, readStoredZip, type ZipInput } from "@/lib/zip";
 
 const pads = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
 
@@ -16,6 +17,33 @@ export type NativePad = {
 export type NativeSound = NativeNode & {
   meta: Record<string, unknown>;
 };
+
+type KitManifest = {
+  version: 1;
+  createdAt: string;
+  project: string;
+  group: string;
+  pads: Array<{
+    pad: string;
+    name: string;
+    soundId: number;
+    assignedPath: string;
+    file: string;
+    meta: Record<string, unknown>;
+  }>;
+};
+
+function safeFilename(value: string) {
+  return value
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "sample";
+}
+
+function bytesToArrayBuffer(bytes: Uint8Array) {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
 
 export class NativeDeviceService {
   readonly tree: NativeTreeCache;
@@ -212,6 +240,71 @@ export class NativeDeviceService {
       await this.assignSound(uploaded[index].path, padPaths[index]);
     }
     return uploaded;
+  }
+
+  async exportActiveKitArchive(onProgress?: (label: string, current: number, total: number) => void) {
+    const [project, group, activePads] = await Promise.all([
+      this.getActiveProject(),
+      this.getActiveGroup(),
+      this.getActivePads(),
+    ]);
+    if (!project || !group) throw new Error("select an active project and group before exporting");
+    const assignedPads = activePads.filter((pad) => pad.assignedPath);
+    const manifest: KitManifest = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      project: project.node.name,
+      group: group.node.name,
+      pads: [],
+    };
+    const files: ZipInput[] = [];
+    for (let index = 0; index < assignedPads.length; index++) {
+      const pad = assignedPads[index];
+      if (!pad.assignedPath) continue;
+      const soundId = Number(pad.meta.sym);
+      const name = safeFilename(String(pad.meta.name || pad.assignedPath.split("/").pop() || `pad_${pad.node.name}`));
+      const filename = `samples/pad_${pad.node.name}_${name}.wav`;
+      onProgress?.(`Pad ${pad.node.name}`, index, assignedPads.length);
+      files.push({ name: filename, data: await this.downloadWav(pad.assignedPath) });
+      manifest.pads.push({
+        pad: pad.node.name,
+        name,
+        soundId,
+        assignedPath: pad.assignedPath,
+        file: filename,
+        meta: pad.meta,
+      });
+    }
+    files.unshift({ name: "kit.json", data: JSON.stringify(manifest, null, 2) });
+    onProgress?.("Packaging kit", assignedPads.length, assignedPads.length);
+    return {
+      filename: `ep-kit-p${project.node.name}-${group.node.name}-${new Date().toISOString().slice(0, 10)}.zip`,
+      blob: await createStoredZip(files),
+      manifest,
+    };
+  }
+
+  async importActiveKitArchive(file: File, onProgress?: (label: string, current: number, total: number) => void) {
+    const entries = await readStoredZip(file);
+    const manifest = readJsonEntry<KitManifest>(entries, "kit.json");
+    if (manifest.version !== 1 || !Array.isArray(manifest.pads)) throw new Error("unsupported kit archive");
+    const activePads = await this.getActivePads();
+    const padByNumber = new Map(activePads.map((pad) => [pad.node.name, pad]));
+    const files: File[] = [];
+    const padPaths: string[] = [];
+    for (const pad of manifest.pads) {
+      const target = padByNumber.get(pad.pad);
+      const entry = entries.find((candidate) => candidate.name === pad.file);
+      if (!target || !entry) continue;
+      files.push(new File([bytesToArrayBuffer(entry.data)], pad.file.split("/").pop() || `pad_${pad.pad}.wav`, { type: "audio/wav" }));
+      padPaths.push(target.path);
+    }
+    if (!files.length) throw new Error("kit archive has no samples matching the active pad layout");
+    await this.uploadSoundsToPads(files, padPaths, (uploadFile, current, total) => {
+      const index = Math.max(0, files.indexOf(uploadFile));
+      onProgress?.(uploadFile.name, index + current / Math.max(1, total), files.length);
+    });
+    return { manifest, imported: files.length };
   }
 
   async listProjects() {
