@@ -297,13 +297,13 @@ export class FileMetadataSetPagedInitRequest implements NativeFileRequest {
   constructor(private fileId: number, private metadataLength: number) {}
 
   asBytes() {
-    const bytes = new Uint8Array(7);
+    const bytes = new Uint8Array(9);
     const view = new DataView(bytes.buffer);
     view.setUint8(0, TE_FILE.METADATA);
     view.setUint8(1, TE_FILE.METADATA_SET_PAGED);
     view.setUint8(2, TE_FILE.METADATA_SET_PAGED_INIT);
     view.setUint16(3, this.fileId);
-    view.setUint16(5, this.metadataLength);
+    view.setUint32(5, this.metadataLength);
     return bytes;
   }
 }

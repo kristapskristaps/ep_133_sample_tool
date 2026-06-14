@@ -151,7 +151,7 @@ export class NativeDeviceService {
 
   async setActiveProject(project: string, preferredGroup?: string) {
     const projectNode = await this.getProjectNode(project);
-    await this.mergeMetadata("/projects", { active: projectNode.id });
+    await this.files.setMetadata(await this.tree.getNodeIdByPath("/projects"), { active: projectNode.id });
     const projectPath = projectNode.path;
     const groupsPath = `${projectPath}/groups`;
     let group = preferredGroup;
@@ -170,14 +170,14 @@ export class NativeDeviceService {
     } catch {
       groupNode = await this.getGroupNode(projectPath, "A");
     }
-    await this.mergeMetadata(groupsPath, { active: groupNode.id });
+    await this.files.setMetadata(await this.tree.getNodeIdByPath(groupsPath), { active: groupNode.id });
   }
 
   async setActiveGroup(group: string) {
     const activeProject = await this.getActiveProject();
     if (!activeProject) throw new Error("no active project");
     const groupNode = await this.getGroupNode(activeProject.path, group);
-    await this.mergeMetadata(`${activeProject.path}/groups`, { active: groupNode.id });
+    await this.files.setMetadata(await this.tree.getNodeIdByPath(`${activeProject.path}/groups`), { active: groupNode.id });
   }
 
   async assignSound(soundPath: string, padPath: string) {
