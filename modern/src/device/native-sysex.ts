@@ -128,6 +128,7 @@ export class TeSysexClient {
     resolve: (message: TeSysexMessage) => void;
     reject: (error: Error) => void;
     timer: number;
+    timeoutMs: number;
   }>();
   private previousHandler: ((event: MIDIMessageEvent) => void) | null = null;
 
@@ -161,12 +162,27 @@ export class TeSysexClient {
     const message = buildTeSysex(this.deviceId, requestId, command, payload);
     this.output.send(message);
     return new Promise<TeSysexMessage>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(requestId);
-        reject(new TeSysexTimeoutError(requestId, timeoutMs));
-      }, timeoutMs);
-      this.pending.set(requestId, { resolve, reject, timer });
+      const timer = this.createTimeout(requestId, timeoutMs, reject);
+      this.pending.set(requestId, { resolve, reject, timer, timeoutMs });
     });
+  }
+
+  private createTimeout(requestId: number, timeoutMs: number, reject: (error: Error) => void) {
+    return window.setTimeout(() => {
+      this.pending.delete(requestId);
+      reject(new TeSysexTimeoutError(requestId, timeoutMs));
+    }, timeoutMs);
+  }
+
+  private resetTimeout(requestId: number, pending: { reject: (error: Error) => void; timer: number; timeoutMs: number }) {
+    window.clearTimeout(pending.timer);
+    pending.timer = this.createTimeout(requestId, pending.timeoutMs, pending.reject);
+  }
+
+  private settle(requestId: number, pending: { timer: number }, callback: () => void) {
+    this.pending.delete(requestId);
+    window.clearTimeout(pending.timer);
+    callback();
   }
 
   private handleMessage(data: Uint8Array) {
@@ -174,14 +190,14 @@ export class TeSysexClient {
     if (!message?.hasRequestId) return;
     const pending = this.pending.get(message.requestId);
     if (!pending) return;
-    if (message.status < TE_SYSEX_STATUS.SPECIFIC_SUCCESS_START) {
-      this.pending.delete(message.requestId);
-      window.clearTimeout(pending.timer);
+    if (message.status === TE_SYSEX_STATUS.SPECIFIC_SUCCESS_START) {
+      this.resetTimeout(message.requestId, pending);
+      return;
     }
-    if (message.status === TE_SYSEX_STATUS.OK || message.status === TE_SYSEX_STATUS.SPECIFIC_SUCCESS_START) {
-      pending.resolve(message);
-    } else if (message.status < TE_SYSEX_STATUS.SPECIFIC_SUCCESS_START) {
-      pending.reject(new TeSysexError(message));
+    if (message.status === TE_SYSEX_STATUS.OK) {
+      this.settle(message.requestId, pending, () => pending.resolve(message));
+    } else {
+      this.settle(message.requestId, pending, () => pending.reject(new TeSysexError(message)));
     }
   }
 }

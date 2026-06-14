@@ -149,28 +149,9 @@ export class NativeDeviceService {
     }
   }
 
-  async setActiveProject(project: string, preferredGroup?: string) {
+  async setActiveProject(project: string) {
     const projectNode = await this.getProjectNode(project);
     await this.files.setMetadata(await this.tree.getNodeIdByPath("/projects"), { active: projectNode.id });
-    const projectPath = projectNode.path;
-    const groupsPath = `${projectPath}/groups`;
-    let group = preferredGroup;
-    if (!group) {
-      try {
-        const current = await this.files.getMetadataJson(await this.tree.getNodeIdByPath(groupsPath));
-        const activeGroup = Number(current.active);
-        if (activeGroup) group = (await this.tree.getNode(await this.tree.getPathByNodeId(activeGroup))).name;
-      } catch {
-        group = undefined;
-      }
-    }
-    let groupNode: NativeNode;
-    try {
-      groupNode = await this.getGroupNode(projectPath, group || "A");
-    } catch {
-      groupNode = await this.getGroupNode(projectPath, "A");
-    }
-    await this.files.setMetadata(await this.tree.getNodeIdByPath(groupsPath), { active: groupNode.id });
   }
 
   async setActiveGroup(group: string) {

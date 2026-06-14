@@ -17,7 +17,7 @@ const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
 const MB = 1024 * 1024;
 const DEFAULT_SAMPLE_STORAGE_BYTES = 64 * MB;
 const EXTENDED_SAMPLE_STORAGE_BYTES = 128 * MB;
-const ENABLE_NATIVE_TARGET_SWITCH = import.meta.env.VITE_ENABLE_NATIVE_TARGET_SWITCH === "true";
+const ENABLE_NATIVE_TARGET_SWITCH = import.meta.env.VITE_DISABLE_NATIVE_TARGET_SWITCH !== "true";
 
 function shortPath(path?: string | null) {
   return path ? path.split("/").pop() || path : "";
@@ -246,7 +246,7 @@ export function useDeviceEngine(): DeviceEngine {
         return;
       }
       setState((current) => ({ ...current, status: `Switching to project ${project}` }));
-      await service.setActiveProject(project, state.activeGroup || "A");
+      await service.setActiveProject(project);
     }),
     setGroup: (group: string) => runNative(async (service) => {
       if (!ENABLE_NATIVE_TARGET_SWITCH) {

@@ -37,11 +37,15 @@ function calculateMaxPayloadLength(value: number) {
 
 export class NativeFileService {
   private chunkSize = 0;
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private client: TeSysexClient) {}
 
   private async request(request: NativeFileRequest, timeoutMs?: number) {
-    return this.client.send(TE_FILE_COMMAND, Uint8Array.from(request.asBytes()), timeoutMs);
+    const run = () => this.client.send(TE_FILE_COMMAND, Uint8Array.from(request.asBytes()), timeoutMs);
+    const queued = this.queue.then(run, run);
+    this.queue = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 
   async init(maxResponseLength = 4 * 1024 * 1024, subscribe = true) {
