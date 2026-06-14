@@ -160,12 +160,11 @@ Implemented:
 - Draw a waveform for the loaded/recorded audio.
 - Draw live recording input level while armed or recording.
 - Add manual chop markers by clicking the waveform.
-- Drag chop markers to adjust slice boundaries.
+- Toggle chop markers directly from the waveform: click empty waveform space to add the next marker, click an existing marker to remove it and renumber.
 - Select chop markers and remove them with the Delete/Backspace key or the sampler controls.
-- Remove chop markers directly from the waveform with double-click or context-click.
 - Generate 4, 8, or 12 equal chops.
-- Basic transient chop suggestion from amplitude onsets.
-- Manual chop mode overwrites key-specific chop markers during playback from the keyboard.
+- Autochop suggestion from amplitude onsets with selectable threshold and predicted chop count.
+- Keyboard chop workflow treats `1` as the sample start and `2`-`´` as later chop starts that can be added or overwritten during playback.
 - Keyboard slice playback uses `1 2 3 4 5 6 7 8 9 0 ß ´` for up to 12 slices.
 - Audition individual slices before assignment.
 - Sampler waveform shows slice regions, marker handles, selected markers, active slices, and playback position.

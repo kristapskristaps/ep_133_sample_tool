@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   AudioWaveform,
@@ -389,14 +389,15 @@ function SampleModal({
   const recordingFrameRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const [source, setSource] = useState<"system" | "mic">("system");
-  const [mode, setMode] = useState<"edit" | "manual" | "perform">("edit");
+  const [mode, setMode] = useState<"edit" | "manual" | "perform">("manual");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [markers, setMarkers] = useState<number[]>([]);
-  const [draggingMarker, setDraggingMarker] = useState<number | null>(null);
   const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
   const [activeSlice, setActiveSlice] = useState<number | null>(null);
   const [playhead, setPlayhead] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [startChopSet, setStartChopSet] = useState(false);
+  const [autoChopSensitivity, setAutoChopSensitivity] = useState(55);
   const [status, setStatus] = useState("Load or record audio");
   const [recordingState, setRecordingState] = useState<"idle" | "armed" | "recording">("idle");
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
@@ -441,6 +442,37 @@ function SampleModal({
   const updateSetting = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
     setSettings({ ...settings, [key]: value });
   };
+
+  const detectTransientMarkers = useCallback((sensitivity: number) => {
+    if (!audioBuffer) return [];
+    const data = audioBuffer.getChannelData(0);
+    const windowSize = Math.max(128, Math.floor(audioBuffer.sampleRate * 0.012));
+    const energies: number[] = [];
+    for (let pos = 0; pos < data.length; pos += windowSize) {
+      let sum = 0;
+      for (let i = 0; i < windowSize && pos + i < data.length; i++) sum += Math.abs(data[pos + i]);
+      energies.push(sum / windowSize);
+    }
+    const average = energies.reduce((sum, value) => sum + value, 0) / Math.max(1, energies.length);
+    const transientRatio = 2.35 - sensitivity * 0.016;
+    const averageRatio = 1.85 - sensitivity * 0.012;
+    const next: number[] = [];
+    let cooldown = 0;
+    for (let index = 1; index < energies.length - 1; index++) {
+      const localPeak = energies[index] >= energies[index + 1] && energies[index] > energies[index - 1] * transientRatio;
+      const strongEnough = energies[index] > average * averageRatio;
+      if (cooldown <= 0 && localPeak && strongEnough) {
+        const marker = (index * windowSize) / data.length;
+        if (marker > 0.02 && marker < 0.98) next.push(Number(marker.toFixed(4)));
+        cooldown = Math.floor(audioBuffer.sampleRate * 0.1 / windowSize);
+      }
+      cooldown--;
+    }
+    return next.slice(0, 11);
+  }, [audioBuffer]);
+
+  const autoChopMarkers = useMemo(() => detectTransientMarkers(autoChopSensitivity), [autoChopSensitivity, detectTransientMarkers]);
+  const autoChopCount = audioBuffer ? Math.min(12, autoChopMarkers.length + 1) : 0;
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -546,8 +578,22 @@ function SampleModal({
       ctx.fillRect(x - 10, 7, 20, 18);
       ctx.fillStyle = selected ? "#071b16" : "#fff7ef";
       ctx.font = "10px sans-serif";
-      ctx.fillText(String(index + 1), x - 3, 20);
+      ctx.fillText(String(index + 2), x - 3, 20);
     });
+
+    if (startChopSet) {
+      ctx.strokeStyle = "#35d08b";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, rect.height);
+      ctx.stroke();
+      ctx.fillStyle = "#35d08b";
+      ctx.fillRect(0, 7, 20, 18);
+      ctx.fillStyle = "#071b16";
+      ctx.font = "10px sans-serif";
+      ctx.fillText("1", 7, 20);
+    }
 
     if (playhead != null) {
       const x = playhead * rect.width;
@@ -564,7 +610,7 @@ function SampleModal({
       ctx.arc(x, 14, 5, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints]);
+  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet]);
 
   useEffect(() => {
     if (!open) return;
@@ -603,6 +649,7 @@ function SampleModal({
       setAudioBuffer(decoded);
       setMarkers([]);
       setSelectedMarker(null);
+      setStartChopSet(false);
       setStatus(`Loaded ${name} (${decoded.duration.toFixed(2)}s)`);
     } finally {
       await context.close();
@@ -617,6 +664,7 @@ function SampleModal({
     setSelectedMarker(null);
     setActiveSlice(null);
     setPlayhead(null);
+    setStartChopSet(false);
     setRecordingPeaks([]);
     chunksRef.current = [];
     setStatus("Sample cleared");
@@ -643,7 +691,14 @@ function SampleModal({
       }
       streamRef.current = stream;
       const audioOnlyStream = new MediaStream(audioTracks);
-      const recorder = new MediaRecorder(audioOnlyStream);
+      const recorderOptions = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+      const recorder = new MediaRecorder(audioOnlyStream, {
+        ...(recorderOptions ? { mimeType: recorderOptions } : {}),
+        audioBitsPerSecond: 320000,
+      });
       recorderRef.current = recorder;
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
@@ -728,6 +783,7 @@ function SampleModal({
     const next = [...markers, rounded].sort((a, b) => a - b);
     setMarkers(next);
     setSelectedMarker(next.findIndex((candidate) => candidate === rounded));
+    setStartChopSet(true);
     setStatus(`${next.length + 1} ${label}`);
   }
 
@@ -754,6 +810,7 @@ function SampleModal({
       .sort((a, b) => a - b);
     setMarkers(sorted);
     setSelectedMarker(sorted.findIndex((marker) => marker === rounded));
+    setStartChopSet(true);
     setStatus(`Chop ${keyLabel} set at ${(rounded * audioBuffer.duration).toFixed(2)}s`);
   }
 
@@ -763,68 +820,34 @@ function SampleModal({
     const nearest = nearestMarkerIndex(marker);
     canvasRef.current.setPointerCapture(event.pointerId);
     if (nearest >= 0) {
-      setDraggingMarker(nearest);
-      setSelectedMarker(nearest);
-      setStatus(`Dragging marker ${nearest + 1}`);
+      removeMarker(nearest);
       return;
     }
     addMarker(marker);
   }
 
   function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!audioBuffer || draggingMarker == null) return;
-    const previous = markers[draggingMarker - 1] ?? 0;
-    const next = markers[draggingMarker + 1] ?? 1;
-    const marker = Math.max(previous + 0.005, Math.min(next - 0.005, markerFromEvent(event)));
-    setMarkers((current) => current.map((candidate, index) => index === draggingMarker ? Number(marker.toFixed(4)) : candidate));
+    event.preventDefault();
   }
 
   function pointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     canvasRef.current?.releasePointerCapture(event.pointerId);
-    if (draggingMarker != null) setStatus(`${markers.length + 1} chops`);
-    setDraggingMarker(null);
-  }
-
-  function removeMarkerFromEvent(event: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) {
-    if (!audioBuffer) return;
-    event.preventDefault();
-    const marker = markerFromEvent(event as React.PointerEvent<HTMLCanvasElement>);
-    const nearest = nearestMarkerIndex(marker);
-    if (nearest >= 0) removeMarker(nearest);
   }
 
   function equalChops(count: number) {
     if (!audioBuffer) return;
     setMarkers(Array.from({ length: count - 1 }, (_, index) => (index + 1) / count));
     setSelectedMarker(null);
+    setStartChopSet(true);
     setStatus(`${count} equal chops`);
   }
 
   function transientChops() {
     if (!audioBuffer) return;
-    const data = audioBuffer.getChannelData(0);
-    const windowSize = Math.max(128, Math.floor(audioBuffer.sampleRate * 0.012));
-    const energies: number[] = [];
-    for (let pos = 0; pos < data.length; pos += windowSize) {
-      let sum = 0;
-      for (let i = 0; i < windowSize && pos + i < data.length; i++) sum += Math.abs(data[pos + i]);
-      energies.push(sum / windowSize);
-    }
-    const average = energies.reduce((sum, value) => sum + value, 0) / Math.max(1, energies.length);
-    const next: number[] = [];
-    let cooldown = 0;
-    for (let index = 1; index < energies.length - 1; index++) {
-      const rising = energies[index] > energies[index - 1] * 1.8 && energies[index] > average * 1.4;
-      if (cooldown <= 0 && rising) {
-        const marker = (index * windowSize) / data.length;
-        if (marker > 0.02 && marker < 0.98) next.push(Number(marker.toFixed(4)));
-        cooldown = Math.floor(audioBuffer.sampleRate * 0.12 / windowSize);
-      }
-      cooldown--;
-    }
-    setMarkers(next.slice(0, 11));
+    setMarkers(autoChopMarkers);
     setSelectedMarker(null);
-    setStatus(`${Math.min(next.length, 11) + 1} transient chops`);
+    setStartChopSet(true);
+    setStatus(`${autoChopMarkers.length + 1} autochops at threshold ${autoChopSensitivity}`);
   }
 
   function play(start = 0, duration?: number, sliceIndex?: number) {
@@ -860,11 +883,7 @@ function SampleModal({
     return playback.offset + playback.context.currentTime - playback.startedAt;
   }
 
-  function fullSampleIsPlaying() {
-    return Boolean(playbackRef.current && playbackRef.current.duration == null);
-  }
-
-  function stampManualChop(markerIndex: number, keyLabel: string) {
+  function stampChopMarker(markerIndex: number, keyLabel: string) {
     if (!audioBuffer) return;
     const position = playbackPosition();
     if (position == null) {
@@ -872,6 +891,29 @@ function SampleModal({
       return;
     }
     setMarkerSlot(markerIndex, position / audioBuffer.duration, keyLabel);
+  }
+
+  function handleChopKey(keyIndex: number, keyLabel: string) {
+    if (!audioBuffer) return;
+    if (keyIndex === 0) {
+      if (!startChopSet) {
+        setStartChopSet(true);
+        play(0);
+        setStatus("Chop 1 set at 0.00s");
+        return;
+      }
+      playSlice(0);
+      return;
+    }
+    if (playbackRef.current) {
+      stampChopMarker(keyIndex - 1, keyLabel);
+      return;
+    }
+    if (startChopSet && slices[keyIndex]) {
+      playSlice(keyIndex);
+      return;
+    }
+    setStatus(`Press 1 to start playback, then press ${keyLabel} to set chop ${keyLabel}`);
   }
 
   useEffect(() => {
@@ -882,8 +924,7 @@ function SampleModal({
       const keyIndex = samplerSliceKeys.findIndex((key) => key.code === event.code);
       if (keyIndex >= 0) {
         event.preventDefault();
-        if (mode === "manual" && fullSampleIsPlaying()) stampManualChop(keyIndex, samplerSliceKeys[keyIndex].label);
-        else playSlice(keyIndex);
+        handleChopKey(keyIndex, samplerSliceKeys[keyIndex].label);
         return;
       }
       if ((event.key === "Backspace" || event.key === "Delete") && selectedMarker != null) {
@@ -899,7 +940,7 @@ function SampleModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, open, selectedMarker, stopPlayback, markers, audioBuffer, slices]);
+  }, [audioBuffer, markers, open, selectedMarker, slices, startChopSet, stopPlayback]);
 
   function encodeWav(channels: Float32Array[], sampleRate: number) {
     const channelCount = channels.length;
@@ -998,7 +1039,7 @@ function SampleModal({
               <Button variant={source === "mic" ? "default" : "outline"} onClick={() => setSource("mic")}>Mic</Button>
               <Button onClick={recordingState === "idle" ? startRecording : stopRecording}><Mic2 className="h-4 w-4" /> {recordingState === "recording" ? "Stop" : recordingState === "armed" ? "Cancel" : "Record"}</Button>
               <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
-              <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect chops</Button>
+              <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
               <Button variant="outline" onClick={() => isPlaying ? stopPlayback() : play()}>{isPlaying ? "Stop" : "Play"}</Button>
               <Button variant="outline" onClick={clearSample}><Trash2 className="h-4 w-4" /> Clear sample</Button>
               <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
@@ -1020,8 +1061,6 @@ function SampleModal({
               onPointerMove={pointerMove}
               onPointerUp={pointerUp}
               onPointerCancel={pointerUp}
-              onDoubleClick={removeMarkerFromEvent}
-              onContextMenu={removeMarkerFromEvent}
               className="h-[360px] w-full touch-none rounded-lg border bg-zinc-950 shadow-inner"
             />
             <div className="grid grid-cols-6 gap-2 sm:grid-cols-12">
@@ -1034,19 +1073,19 @@ function SampleModal({
                       "grid h-16 content-center rounded-md border bg-background px-2 text-left text-xs hover:border-primary disabled:opacity-45",
                       activeSlice === index && "border-primary bg-primary/10",
                     )}
-                    onClick={() => mode === "manual" && fullSampleIsPlaying() ? stampManualChop(index, key.label) : playSlice(index)}
-                    disabled={!audioBuffer || (mode === "manual" ? (!fullSampleIsPlaying() && !slice) : !slice)}
+                    onClick={() => handleChopKey(index, key.label)}
+                    disabled={!audioBuffer || (index > 0 && !isPlaying && !(startChopSet && slice))}
                   >
                     <span className="text-sm font-semibold">{key.label}</span>
-                    <span className="truncate text-muted-foreground">{slice ? `Slice ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
-                    <span className="text-muted-foreground">{slice ? `${slice.duration.toFixed(2)}s` : `Pad ${Number(pad?.number || 1) + index}`}</span>
+                    <span className="truncate text-muted-foreground">{index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
+                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : `Pad ${Number(pad?.number || 1) + index}`}</span>
                   </button>
                 );
               })}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <span>{status}</span>
-              <span>{mode === "manual" ? "Space starts/stops. During playback, keys overwrite chop marks; stopped keys play slices." : "Space starts/stops. Keys 1-0, ß, ´ play slices."}</span>
+              <span>Space starts/stops without setting chop 1. Press 1 to set the start, then press 2-´ while playing to add or overwrite chops.</span>
             </div>
           </div>
           <div className="grid content-start gap-3">
@@ -1057,9 +1096,27 @@ function SampleModal({
                 <Button variant="outline" onClick={() => equalChops(8)}>8</Button>
                 <Button variant="outline" onClick={() => equalChops(12)}>12</Button>
               </div>
-              <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect transients</Button>
+              <div className="grid gap-2 rounded-md border bg-background p-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium text-foreground">Autochop threshold</span>
+                  <span className="text-muted-foreground">{audioBuffer ? `${autoChopCount} chop${autoChopCount === 1 ? "" : "s"}` : "load audio"}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={autoChopSensitivity}
+                  onChange={(event) => setAutoChopSensitivity(Number(event.target.value))}
+                />
+                <div className="flex justify-between text-[11px] text-muted-foreground">
+                  <span>fewer</span>
+                  <span>{autoChopSensitivity}</span>
+                  <span>more</span>
+                </div>
+              </div>
+              <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
               <Button variant="outline" className="justify-start" onClick={() => removeMarker(selectedMarker)} disabled={selectedMarker == null}><Trash2 className="h-4 w-4" /> Remove marker</Button>
-              <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
+              <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); setStartChopSet(false); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
             </div>
 
             <div className="grid gap-2 rounded-lg border bg-muted/25 p-3">
