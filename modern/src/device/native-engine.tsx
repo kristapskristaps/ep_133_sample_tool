@@ -363,10 +363,10 @@ export function useDeviceEngine(): DeviceEngine {
       downloadBlob(wav, `${shortPath(pad.assignedPath) || "pad"}.wav`);
     }),
     exportKit: () => runNative(async (service) => {
-      setState((current) => ({ ...current, uploading: true, status: "Exporting active kit" }));
+      setState((current) => ({ ...current, uploading: true, status: "Preparing kit export" }));
       const archive = await service.exportActiveKitArchive((label, current, total) => {
         const percent = total ? ` ${Math.round((current / total) * 100)}%` : "";
-        setState((existing) => ({ ...existing, uploading: true, status: `Exporting ${label}${percent}` }));
+        setState((existing) => ({ ...existing, uploading: true, status: `${label}${percent}` }));
       });
       downloadBlob(archive.blob, archive.filename);
       setState((current) => ({ ...current, uploading: false, status: `Exported ${archive.manifest.pads.length} kit sample${archive.manifest.pads.length === 1 ? "" : "s"}` }));

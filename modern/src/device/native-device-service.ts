@@ -320,8 +320,14 @@ export class NativeDeviceService {
       const soundId = Number(pad.meta.sym);
       const name = safeFilename(String(pad.meta.name || pad.assignedPath.split("/").pop() || `pad_${pad.node.name}`));
       const filename = `samples/pad_${pad.node.name}_${name}.wav`;
-      onProgress?.(`Pad ${pad.node.name}`, index, assignedPads.length);
-      files.push({ name: filename, data: await this.downloadWav(pad.assignedPath) });
+      onProgress?.(`Downloading pad ${pad.node.name}`, index, assignedPads.length);
+      files.push({
+        name: filename,
+        data: await this.downloadWav(pad.assignedPath, (current, total) => {
+          const fraction = current / Math.max(1, total);
+          onProgress?.(`Downloading pad ${pad.node.name}`, index + fraction, assignedPads.length);
+        }),
+      });
       manifest.pads.push({
         pad: pad.node.name,
         name,
@@ -330,6 +336,7 @@ export class NativeDeviceService {
         file: filename,
         meta: pad.meta,
       });
+      onProgress?.(`Prepared pad ${pad.node.name}`, index + 1, assignedPads.length);
     }
     files.unshift({ name: "kit.json", data: JSON.stringify(manifest, null, 2) });
     onProgress?.("Packaging kit", assignedPads.length, assignedPads.length);

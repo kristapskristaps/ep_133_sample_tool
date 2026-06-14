@@ -1125,6 +1125,40 @@ function ConnectOverlay({ engine }: { engine: DeviceEngine }) {
   );
 }
 
+function OperationOverlay({ engine }: { engine: DeviceEngine }) {
+  if (!engine.uploading) return null;
+  const status = engine.status || "Working";
+  const title = /export|download|packag|prepared/i.test(status)
+    ? "Exporting kit"
+    : /import/i.test(status)
+      ? "Importing kit"
+      : /upload|preparing|slot/i.test(status)
+        ? "Transferring samples"
+        : "Working";
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-background/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-xl border bg-card p-5 text-card-foreground shadow-2xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+          </div>
+          <div className="min-w-0">
+            <div className="font-semibold">{title}</div>
+            <div className="truncate text-sm text-muted-foreground">{status}</div>
+          </div>
+        </div>
+        <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
+          <div className="h-full w-1/2 animate-pulse rounded-full bg-primary" />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Keep the EP connected. Large kits can take a while because each assigned pad sample is downloaded as WAV before the archive is packaged.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const { dark, setDark } = useTheme();
   const engine = useDeviceEngine();
@@ -1217,6 +1251,7 @@ export function App() {
           setSamplerOpen(false);
         }}
       />
+      <OperationOverlay engine={engine} />
       {!engine.connected && <ConnectOverlay engine={engine} />}
     </div>
   );
