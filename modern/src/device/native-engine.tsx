@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { projects } from "@/device/constants";
-import { NativeDeviceService } from "@/device/native-device-service";
+import { NativeDeviceService, type NativePad } from "@/device/native-device-service";
 import { NativeFileService } from "@/device/native-file-service";
 import { scanNativeMidi } from "@/device/native-midi";
 import type { NativeMidiDevice } from "@/device/native-midi";
@@ -77,6 +77,17 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function mapNativePads(nativePads: NativePad[]) {
+  return nativePads.length ? nativePads.map((pad) => ({
+    number: pad.node.name,
+    name: String(pad.meta.name || shortPath(pad.assignedPath) || ""),
+    type: pad.assignedPath ? `Sound ${Number(pad.meta.sym)}` : "Unassigned",
+    assignedPath: pad.assignedPath || undefined,
+    size: pad.assignedPath ? shortPath(pad.assignedPath) : "drop sample",
+    raw: pad,
+  })) : fallbackPads;
+}
+
 function initialState(): EngineState {
   return {
     ready: true,
@@ -125,14 +136,7 @@ export function useDeviceEngine(): DeviceEngine {
       service.getActivePads(),
       service.listSoundsWithMetadata(),
     ]);
-    const pads = nativePads.length ? nativePads.map((pad) => ({
-      number: pad.node.name,
-      name: String(pad.meta.name || shortPath(pad.assignedPath) || ""),
-      type: pad.assignedPath ? `Sound ${Number(pad.meta.sym)}` : "Unassigned",
-      assignedPath: pad.assignedPath || undefined,
-      size: pad.assignedPath ? shortPath(pad.assignedPath) : "drop sample",
-      raw: pad,
-    })) : fallbackPads;
+    const pads = mapNativePads(nativePads);
     const sounds = nativeSounds
       .map((sound) => {
         const id = sound.id || soundIdFromName(sound.name);
@@ -261,12 +265,16 @@ export function useDeviceEngine(): DeviceEngine {
         return;
       }
       setState((current) => ({ ...current, status: `Switching to project ${project}` }));
-      await service.setActiveProject(project);
-      await wait(250);
+      const group = state.activeGroup || "A";
+      await service.setActiveProject(project, group);
+      await wait(500);
+      const target = await service.getPadsForProjectGroup(project, group);
       setState((current) => ({
         ...current,
-        activeProject: normalizeProjectName(project),
-        target: `P${normalizeProjectName(project)} / ${current.activeGroup || "A"}`,
+        activeProject: normalizeProjectName(target.project.name),
+        activeGroup: normalizeGroupName(target.group.name),
+        target: `P${normalizeProjectName(target.project.name)} / ${normalizeGroupName(target.group.name)}`,
+        pads: mapNativePads(target.pads),
       }));
     }),
     setGroup: (group: string) => runNative(async (service) => {
@@ -279,11 +287,17 @@ export function useDeviceEngine(): DeviceEngine {
       }
       setState((current) => ({ ...current, status: `Switching to group ${group}` }));
       await service.setActiveGroup(group);
-      await wait(250);
+      await wait(500);
+      const project = state.activeProject || "";
+      const target = project ? await service.getPadsForProjectGroup(project, group) : null;
       setState((current) => ({
         ...current,
-        activeGroup: normalizeGroupName(group),
-        target: `${current.activeProject ? `P${current.activeProject}` : "P--"} / ${normalizeGroupName(group)}`,
+        activeProject: target ? normalizeProjectName(target.project.name) : current.activeProject,
+        activeGroup: target ? normalizeGroupName(target.group.name) : normalizeGroupName(group),
+        target: target
+          ? `P${normalizeProjectName(target.project.name)} / ${normalizeGroupName(target.group.name)}`
+          : `${current.activeProject ? `P${current.activeProject}` : "P--"} / ${normalizeGroupName(group)}`,
+        pads: target ? mapNativePads(target.pads) : current.pads,
       }));
     }),
     uploadToPads: (files: File[], pads: Pad[]) => runNative(async (service) => {

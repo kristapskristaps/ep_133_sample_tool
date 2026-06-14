@@ -119,7 +119,11 @@ export class NativeDeviceService {
   async getActivePads() {
     const group = await this.getActiveGroup();
     if (!group) return [];
-    const children = await this.tree.listChildren(group.path);
+    return this.getPadsForGroupPath(group.path);
+  }
+
+  async getPadsForGroupPath(groupPath: string) {
+    const children = await this.tree.listChildren(groupPath);
     const ordered = children
       .filter((node) => pads.includes(node.name))
       .sort((a, b) => pads.indexOf(a.name) - pads.indexOf(b.name));
@@ -137,6 +141,21 @@ export class NativeDeviceService {
     return result;
   }
 
+  async getPadsForProjectGroup(project: string, group: string) {
+    const projectNode = await this.getProjectNode(project);
+    let groupNode: NativeNode;
+    try {
+      groupNode = await this.getGroupNode(projectNode.path, group);
+    } catch {
+      groupNode = await this.getGroupNode(projectNode.path, "A");
+    }
+    return {
+      project: projectNode,
+      group: groupNode,
+      pads: await this.getPadsForGroupPath(groupNode.path),
+    };
+  }
+
   async *getProjectPadMeta(project: string) {
     for (const group of groups) {
       for (const pad of pads) {
@@ -149,9 +168,18 @@ export class NativeDeviceService {
     }
   }
 
-  async setActiveProject(project: string) {
+  async setActiveProject(project: string, preferredGroup?: string) {
     const projectNode = await this.getProjectNode(project);
     await this.files.setMetadata(await this.tree.getNodeIdByPath("/projects"), { active: projectNode.id });
+    if (preferredGroup) {
+      let groupNode: NativeNode;
+      try {
+        groupNode = await this.getGroupNode(projectNode.path, preferredGroup);
+      } catch {
+        groupNode = await this.getGroupNode(projectNode.path, "A");
+      }
+      await this.files.setMetadata(await this.tree.getNodeIdByPath(`${projectNode.path}/groups`), { active: groupNode.id });
+    }
   }
 
   async setActiveGroup(group: string) {
