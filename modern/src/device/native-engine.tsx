@@ -17,6 +17,7 @@ const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
 const MB = 1024 * 1024;
 const DEFAULT_SAMPLE_STORAGE_BYTES = 64 * MB;
 const EXTENDED_SAMPLE_STORAGE_BYTES = 128 * MB;
+const ENABLE_NATIVE_TARGET_SWITCH = import.meta.env.VITE_ENABLE_NATIVE_TARGET_SWITCH === "true";
 
 function shortPath(path?: string | null) {
   return path ? path.split("/").pop() || path : "";
@@ -77,6 +78,7 @@ function initialState(): EngineState {
     status: "Native engine ready",
     sounds: [],
     memoryUsedPercent: 0,
+    targetSwitchingEnabled: ENABLE_NATIVE_TARGET_SWITCH,
   };
 }
 
@@ -236,10 +238,24 @@ export function useDeviceEngine(): DeviceEngine {
     connect,
     refresh: () => runNative(async () => refreshNative()),
     setProject: (project: string) => runNative(async (service) => {
+      if (!ENABLE_NATIVE_TARGET_SWITCH) {
+        setState((current) => ({
+          ...current,
+          status: "Native project switching is disabled because it can reboot the device. Change project on the EP, then refresh.",
+        }));
+        return;
+      }
       setState((current) => ({ ...current, status: `Switching to project ${project}` }));
       await service.setActiveProject(project, state.activeGroup || "A");
     }),
     setGroup: (group: string) => runNative(async (service) => {
+      if (!ENABLE_NATIVE_TARGET_SWITCH) {
+        setState((current) => ({
+          ...current,
+          status: "Native group switching is disabled because it can reboot the device. Change group on the EP, then refresh.",
+        }));
+        return;
+      }
       setState((current) => ({ ...current, status: `Switching to group ${group}` }));
       await service.setActiveGroup(group);
     }),

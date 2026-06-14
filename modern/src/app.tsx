@@ -999,14 +999,21 @@ function Workspace({
         <Card>
           <CardHeader>
             <CardTitle>Active Target</CardTitle>
-            <CardDescription>Uploads and imports land here.</CardDescription>
+            <CardDescription>
+              {engine.targetSwitchingEnabled ? "Uploads and imports land here." : "Read from the device. Change target on the EP, then refresh."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div>
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Project</div>
               <div className="grid grid-cols-3 gap-2">
                 {projects.map((project) => (
-                  <Button key={project} variant={project === engine.activeProject ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setProject(project)}>
+                  <Button
+                    key={project}
+                    variant={project === engine.activeProject ? "default" : "outline"}
+                    disabled={!engine.connected || !engine.targetSwitchingEnabled}
+                    onClick={() => engine.setProject(project)}
+                  >
                     {project}
                   </Button>
                 ))}
@@ -1016,7 +1023,12 @@ function Workspace({
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Group</div>
               <div className="grid grid-cols-4 gap-2">
                 {groups.map((group) => (
-                  <Button key={group} variant={group === engine.activeGroup ? "default" : "outline"} disabled={!engine.connected} onClick={() => engine.setGroup(group)}>
+                  <Button
+                    key={group}
+                    variant={group === engine.activeGroup ? "default" : "outline"}
+                    disabled={!engine.connected || !engine.targetSwitchingEnabled}
+                    onClick={() => engine.setGroup(group)}
+                  >
                     {group}
                   </Button>
                 ))}

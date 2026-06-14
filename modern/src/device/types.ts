@@ -93,6 +93,7 @@ export type EngineState = {
   status: string;
   sounds: Sound[];
   memoryUsedPercent: number;
+  targetSwitchingEnabled: boolean;
 };
 
 export type DeviceActions = {
