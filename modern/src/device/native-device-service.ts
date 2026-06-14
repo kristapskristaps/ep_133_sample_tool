@@ -65,6 +65,34 @@ export class NativeDeviceService {
     await this.files.setMetadata(await this.tree.getNodeIdByPath(path), metadata);
   }
 
+  async mergeMetadata(path: string, metadata: Record<string, unknown>) {
+    let current: Record<string, unknown> = {};
+    try {
+      current = await this.getMetadata(path);
+    } catch {
+      current = {};
+    }
+    await this.setMetadata(path, { ...current, ...metadata });
+  }
+
+  async getProjectNode(project: string) {
+    const children = await this.tree.listChildren("/projects");
+    const requested = Number(project);
+    const node = children.find((candidate) => (
+      candidate.name === project ||
+      (Number.isFinite(requested) && Number(candidate.name) === requested)
+    ));
+    if (!node) throw new Error(`project ${project} not found on device`);
+    return node;
+  }
+
+  async getGroupNode(projectPath: string, group: string) {
+    const children = await this.tree.listChildren(`${projectPath}/groups`);
+    const node = children.find((candidate) => candidate.name.toUpperCase() === group.toUpperCase());
+    if (!node) throw new Error(`group ${group} not found on device`);
+    return node;
+  }
+
   async getActiveProject() {
     const projectsId = await this.tree.getNodeIdByPath("/projects");
     const meta = await this.files.getMetadataJson(projectsId);
@@ -121,16 +149,35 @@ export class NativeDeviceService {
     }
   }
 
-  async setActiveProject(project: string) {
-    const active = await this.tree.getNodeIdByPath(`/projects/${project}`);
-    await this.files.setMetadata(await this.tree.getNodeIdByPath("/projects"), { active });
+  async setActiveProject(project: string, preferredGroup?: string) {
+    const projectNode = await this.getProjectNode(project);
+    await this.mergeMetadata("/projects", { active: projectNode.id });
+    const projectPath = projectNode.path;
+    const groupsPath = `${projectPath}/groups`;
+    let group = preferredGroup;
+    if (!group) {
+      try {
+        const current = await this.files.getMetadataJson(await this.tree.getNodeIdByPath(groupsPath));
+        const activeGroup = Number(current.active);
+        if (activeGroup) group = (await this.tree.getNode(await this.tree.getPathByNodeId(activeGroup))).name;
+      } catch {
+        group = undefined;
+      }
+    }
+    let groupNode: NativeNode;
+    try {
+      groupNode = await this.getGroupNode(projectPath, group || "A");
+    } catch {
+      groupNode = await this.getGroupNode(projectPath, "A");
+    }
+    await this.mergeMetadata(groupsPath, { active: groupNode.id });
   }
 
   async setActiveGroup(group: string) {
     const activeProject = await this.getActiveProject();
     if (!activeProject) throw new Error("no active project");
-    const active = await this.tree.getNodeIdByPath(`${activeProject.path}/groups/${group}`);
-    await this.files.setMetadata(await this.tree.getNodeIdByPath(`${activeProject.path}/groups`), { active });
+    const groupNode = await this.getGroupNode(activeProject.path, group);
+    await this.mergeMetadata(`${activeProject.path}/groups`, { active: groupNode.id });
   }
 
   async assignSound(soundPath: string, padPath: string) {

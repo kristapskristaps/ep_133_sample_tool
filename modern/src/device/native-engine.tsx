@@ -235,8 +235,14 @@ export function useDeviceEngine(): DeviceEngine {
     sounds: state.sounds.map((sound) => ({ ...sound, usageProjects: usageMap[sound.id] || [] })),
     connect,
     refresh: () => runNative(async () => refreshNative()),
-    setProject: (project: string) => runNative((service) => service.setActiveProject(project)),
-    setGroup: (group: string) => runNative((service) => service.setActiveGroup(group)),
+    setProject: (project: string) => runNative(async (service) => {
+      setState((current) => ({ ...current, status: `Switching to project ${project}` }));
+      await service.setActiveProject(project, state.activeGroup || "A");
+    }),
+    setGroup: (group: string) => runNative(async (service) => {
+      setState((current) => ({ ...current, status: `Switching to group ${group}` }));
+      await service.setActiveGroup(group);
+    }),
     uploadToPads: (files: File[], pads: Pad[]) => runNative(async (service) => {
       setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"}` }));
       const processed = await processTransferFiles(files);
