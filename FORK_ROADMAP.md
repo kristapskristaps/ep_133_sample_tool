@@ -154,13 +154,22 @@ Implemented:
 
 - Capture shared system/tab audio when Chromium and OS permissions allow it.
 - Capture microphone audio.
+- Arm recording and start capture only after input audio crosses the signal gate.
 - Load a local audio file.
+- Clear the loaded/recorded sample from the sampler workspace.
 - Draw a waveform for the loaded/recorded audio.
+- Draw live recording input level while armed or recording.
 - Add manual chop markers by clicking the waveform.
 - Drag chop markers to adjust slice boundaries.
+- Select chop markers and remove them with the Delete/Backspace key or the sampler controls.
+- Remove chop markers directly from the waveform with double-click or context-click.
 - Generate 4, 8, or 12 equal chops.
 - Basic transient chop suggestion from amplitude onsets.
+- Manual chop mode overwrites key-specific chop markers during playback from the keyboard.
+- Keyboard slice playback uses `1 2 3 4 5 6 7 8 9 0 ß ´` for up to 12 slices.
 - Audition individual slices before assignment.
+- Sampler waveform shows slice regions, marker handles, selected markers, active slices, and playback position.
+- Sampler modal includes compact transfer DSP controls for normalize, trim, mono, low cut, high cut, lo-fi rate/bit depth, gain, and target dB.
 - Render chops as WAV files.
 - Assign rendered chops to pads starting from the selected pad.
 

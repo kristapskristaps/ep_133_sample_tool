@@ -6,4 +6,4 @@ export { NativeFileService } from "@/device/native-file-service";
 export { TeSysexClient, buildTeSysex, pack7Bit, parseTeSysex, unpack7Bit } from "@/device/native-sysex";
 export { NativeTreeCache } from "@/device/native-tree";
 export type { NativeNode } from "@/device/native-tree";
-export type { DeviceActions, DeviceEngine, EngineBridge, EngineState, Pad, Sound } from "@/device/types";
+export type { DeviceActions, DeviceEngine, EngineBridge, EngineState, Pad, PadUploadSlotTarget, Sound } from "@/device/types";

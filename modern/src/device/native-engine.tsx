@@ -6,7 +6,7 @@ import { scanNativeMidi } from "@/device/native-midi";
 import type { NativeMidiDevice } from "@/device/native-midi";
 import { TeSysexClient } from "@/device/native-sysex";
 import { processTransferFiles } from "@/dsp/settings";
-import type { DeviceEngine, EngineState, Pad, Sound } from "@/device/types";
+import type { DeviceEngine, EngineState, Pad, PadUploadSlotTarget, Sound } from "@/device/types";
 
 const fallbackPads: Pad[] = Array.from({ length: 12 }, (_, index) => ({
   number: String(index + 1).padStart(2, "0"),
@@ -71,6 +71,18 @@ function storageBytesForUsage(deviceStorageBytes: number | undefined, usedBytes:
   const base = deviceStorageBytes || DEFAULT_SAMPLE_STORAGE_BYTES;
   if (usedBytes > DEFAULT_SAMPLE_STORAGE_BYTES && base < EXTENDED_SAMPLE_STORAGE_BYTES) return EXTENDED_SAMPLE_STORAGE_BYTES;
   return base;
+}
+
+function slotTargetLabel(slotTarget?: PadUploadSlotTarget) {
+  if (slotTarget?.mode === "bank") return `bank ${String(slotTarget.startSlot).padStart(3, "0")}-${String(slotTarget.endSlot).padStart(3, "0")}`;
+  if (slotTarget?.mode === "slot") return `slot ${String(slotTarget.startSlot).padStart(3, "0")}`;
+  return "first free slot";
+}
+
+function slotTargetOptions(slotTarget?: PadUploadSlotTarget) {
+  if (slotTarget?.mode === "bank") return { startSlot: slotTarget.startSlot, endSlot: slotTarget.endSlot };
+  if (slotTarget?.mode === "slot") return { startSlot: slotTarget.startSlot, endSlot: 999, exact: true };
+  return {};
 }
 
 function wait(ms: number) {
@@ -300,8 +312,8 @@ export function useDeviceEngine(): DeviceEngine {
         pads: target ? mapNativePads(target.pads) : current.pads,
       }));
     }),
-    uploadToPads: (files: File[], pads: Pad[]) => runNative(async (service) => {
-      setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"}` }));
+    uploadToPads: (files: File[], pads: Pad[], slotTarget?: PadUploadSlotTarget) => runNative(async (service) => {
+      setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"} for ${slotTargetLabel(slotTarget)}` }));
       const processed = await processTransferFiles(files);
       const padPaths = pads.flatMap((pad) => {
         const raw = pad.raw as { path?: string } | undefined;
@@ -309,7 +321,7 @@ export function useDeviceEngine(): DeviceEngine {
       });
       await service.uploadSoundsToPads(processed, padPaths, (file, current, total) => {
         setState((existing) => ({ ...existing, uploading: true, status: `Uploading ${file.name}: ${Math.round((current / Math.max(1, total)) * 100)}%` }));
-      });
+      }, slotTargetOptions(slotTarget));
       setState((current) => ({ ...current, uploading: false, status: "Native pad upload complete" }));
     }),
     uploadSamples: (files: File[]) => runNative(async (service) => {

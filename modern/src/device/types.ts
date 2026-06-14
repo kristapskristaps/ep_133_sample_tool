@@ -22,6 +22,11 @@ export type Sound = {
   raw?: unknown;
 };
 
+export type PadUploadSlotTarget =
+  | { mode: "next-free" }
+  | { mode: "bank"; startSlot: number; endSlot: number }
+  | { mode: "slot"; startSlot: number };
+
 export type EngineBridge = {
   device?: {
     deviceService?: {
@@ -101,7 +106,7 @@ export type DeviceActions = {
   refresh: () => void | Promise<void>;
   setProject: (project: string) => void | Promise<void>;
   setGroup: (group: string) => void | Promise<void>;
-  uploadToPads: (files: File[], pads: Pad[]) => void | Promise<void>;
+  uploadToPads: (files: File[], pads: Pad[], slotTarget?: PadUploadSlotTarget) => void | Promise<void>;
   uploadSamples: (files: File[]) => void | Promise<void>;
   uploadSamplesToSlots: (files: File[], startSlot: number, replace?: boolean) => void | Promise<void>;
   playSound: (sound?: Sound) => void | Promise<void>;

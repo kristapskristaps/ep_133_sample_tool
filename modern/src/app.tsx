@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { DeviceEngineHost, groups, projects, useDeviceEngine, type DeviceEngine, type Pad, type Sound } from "@/device";
+import { DeviceEngineHost, groups, projects, useDeviceEngine, type DeviceEngine, type Pad, type PadUploadSlotTarget, type Sound } from "@/device";
 import { defaultSettings, loadInitialSampleSettings, syncOfflineDspSettings, type SampleSettings } from "@/dsp/settings";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +70,167 @@ function SettingRow({
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
+  );
+}
+
+const samplerSliceKeys = [
+  { code: "Digit1", label: "1" },
+  { code: "Digit2", label: "2" },
+  { code: "Digit3", label: "3" },
+  { code: "Digit4", label: "4" },
+  { code: "Digit5", label: "5" },
+  { code: "Digit6", label: "6" },
+  { code: "Digit7", label: "7" },
+  { code: "Digit8", label: "8" },
+  { code: "Digit9", label: "9" },
+  { code: "Digit0", label: "0" },
+  { code: "Minus", label: "ß" },
+  { code: "Equal", label: "´" },
+] as const;
+
+const samplerProcessToggles: { key: keyof Pick<SampleSettings, "normalize" | "trim" | "mono" | "lofi" | "lowCut" | "highCut">; label: string }[] = [
+  { key: "normalize", label: "Normalize" },
+  { key: "trim", label: "Trim" },
+  { key: "mono", label: "Mono" },
+  { key: "lofi", label: "Lo-Fi" },
+  { key: "lowCut", label: "Low cut" },
+  { key: "highCut", label: "High cut" },
+];
+
+type PadUploadSlotChoice = {
+  mode: "next-free" | "bank" | "slot";
+  bankStart: number;
+  slot: string;
+};
+
+const padUploadBanks = Array.from({ length: 10 }, (_, index) => {
+  const startSlot = index * 100 + 1;
+  const endSlot = index === 9 ? 999 : startSlot + 99;
+  return {
+    startSlot,
+    endSlot,
+    label: `${String(startSlot).padStart(3, "0")}-${String(endSlot).padStart(3, "0")}`,
+  };
+});
+
+const defaultPadUploadSlotChoice: PadUploadSlotChoice = {
+  mode: "next-free",
+  bankStart: 1,
+  slot: "1",
+};
+
+function getPadUploadSlotTarget(choice: PadUploadSlotChoice): PadUploadSlotTarget | null {
+  if (choice.mode === "bank") {
+    const bank = padUploadBanks.find((candidate) => candidate.startSlot === choice.bankStart) || padUploadBanks[0];
+    return { mode: "bank", startSlot: bank.startSlot, endSlot: bank.endSlot };
+  }
+  if (choice.mode === "slot") {
+    const startSlot = Number(choice.slot);
+    if (!Number.isInteger(startSlot) || startSlot < 1 || startSlot > 999) return null;
+    return { mode: "slot", startSlot };
+  }
+  return { mode: "next-free" };
+}
+
+function preparePadUpload(files: File[], pads: Pad[], engine: DeviceEngine, choice: PadUploadSlotChoice) {
+  const uploadCount = Math.min(files.length, pads.length);
+  if (!uploadCount) return null;
+  const slotTarget = getPadUploadSlotTarget(choice);
+  if (!slotTarget) {
+    window.alert("Choose a sample slot between 001 and 999.");
+    return null;
+  }
+  if (slotTarget.mode === "bank") {
+    const used = new Set(engine.sounds.map((sound) => sound.id));
+    const freeSlots = Array.from({ length: slotTarget.endSlot - slotTarget.startSlot + 1 }, (_, index) => slotTarget.startSlot + index)
+      .filter((slot) => !used.has(slot));
+    if (freeSlots.length < uploadCount) {
+      window.alert(`Bank ${String(slotTarget.startSlot).padStart(3, "0")}-${String(slotTarget.endSlot).padStart(3, "0")} only has ${freeSlots.length} free slot${freeSlots.length === 1 ? "" : "s"}.`);
+      return null;
+    }
+  }
+  if (slotTarget.mode === "slot") {
+    const endSlot = slotTarget.startSlot + uploadCount - 1;
+    if (endSlot > 999) {
+      window.alert(`Uploading ${uploadCount} sample${uploadCount === 1 ? "" : "s"} from slot ${String(slotTarget.startSlot).padStart(3, "0")} would exceed slot 999.`);
+      return null;
+    }
+    const occupied = engine.sounds.filter((sound) => sound.id >= slotTarget.startSlot && sound.id <= endSlot);
+    if (occupied.length) {
+      const label = occupied.length === 1
+        ? `sample ${String(occupied[0].id).padStart(3, "0")} "${occupied[0].name}"`
+        : `${occupied.length} occupied slots from ${String(slotTarget.startSlot).padStart(3, "0")}-${String(endSlot).padStart(3, "0")}`;
+      if (!window.confirm(`Replace ${label}?`)) return null;
+    }
+  }
+  return {
+    files: files.slice(0, uploadCount),
+    pads: pads.slice(0, uploadCount),
+    slotTarget,
+  };
+}
+
+function PadUploadSlotPanel({
+  choice,
+  setChoice,
+}: {
+  choice: PadUploadSlotChoice;
+  setChoice: (choice: PadUploadSlotChoice) => void;
+}) {
+  const update = (next: Partial<PadUploadSlotChoice>) => setChoice({ ...choice, ...next });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Pad Upload Slot</CardTitle>
+        <CardDescription>Choose where new pad samples are stored before the pad is assigned.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { mode: "next-free", label: "Next free" },
+            { mode: "bank", label: "Bank" },
+            { mode: "slot", label: "Slot" },
+          ].map((option) => (
+            <Button
+              key={option.mode}
+              type="button"
+              variant={choice.mode === option.mode ? "default" : "outline"}
+              onClick={() => update({ mode: option.mode as PadUploadSlotChoice["mode"] })}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        {choice.mode === "bank" && (
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            First free in bank
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={choice.bankStart}
+              onChange={(event) => update({ bankStart: Number(event.target.value) })}
+            >
+              {padUploadBanks.map((bank) => (
+                <option key={bank.startSlot} value={bank.startSlot}>{bank.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {choice.mode === "slot" && (
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Starting slot
+            <input
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              inputMode="numeric"
+              min={1}
+              max={999}
+              value={choice.slot}
+              onChange={(event) => update({ slot: event.target.value.replace(/\D/g, "").slice(0, 3) })}
+            />
+          </label>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -209,24 +370,36 @@ function SampleModal({
   pad,
   onClose,
   onUpload,
+  settings,
+  setSettings,
 }: {
   open: boolean;
   pad?: Pad;
   onClose: () => void;
   onUpload: (files: File[], startPad: number) => void;
+  settings: SampleSettings;
+  setSettings: (settings: SampleSettings) => void;
 }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number; duration?: number } | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recordingContextRef = useRef<AudioContext | null>(null);
+  const recordingFrameRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const [source, setSource] = useState<"system" | "mic">("system");
+  const [mode, setMode] = useState<"edit" | "manual" | "perform">("edit");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [markers, setMarkers] = useState<number[]>([]);
   const [draggingMarker, setDraggingMarker] = useState<number | null>(null);
+  const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
+  const [activeSlice, setActiveSlice] = useState<number | null>(null);
+  const [playhead, setPlayhead] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [status, setStatus] = useState("Load or record audio");
-  const [recording, setRecording] = useState(false);
+  const [recordingState, setRecordingState] = useState<"idle" | "armed" | "recording">("idle");
+  const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
 
   const stopPlayback = useCallback(() => {
     if (!playbackRef.current) return;
@@ -235,7 +408,39 @@ function SampleModal({
     } catch {}
     void playbackRef.current.context.close();
     playbackRef.current = null;
+    setPlayhead(null);
+    setActiveSlice(null);
+    setIsPlaying(false);
   }, []);
+
+  const stopRecordingMonitor = useCallback(() => {
+    if (recordingFrameRef.current != null) {
+      window.cancelAnimationFrame(recordingFrameRef.current);
+      recordingFrameRef.current = null;
+    }
+    void recordingContextRef.current?.close();
+    recordingContextRef.current = null;
+  }, []);
+
+  const clearRecorder = useCallback(() => {
+    stopRecordingMonitor();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    recorderRef.current = null;
+    setRecordingState("idle");
+  }, [stopRecordingMonitor]);
+
+  const slicePoints = [0, ...markers, 1].sort((a, b) => a - b);
+  const slices = slicePoints.slice(0, -1).map((start, index) => ({
+    index,
+    start,
+    end: slicePoints[index + 1],
+    duration: audioBuffer ? (slicePoints[index + 1] - start) * audioBuffer.duration : 0,
+  }));
+
+  const updateSetting = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
+    setSettings({ ...settings, [key]: value });
+  };
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -248,21 +453,70 @@ function SampleModal({
     if (!ctx) return;
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
-    ctx.fillStyle = "#071b16";
+    const background = ctx.createLinearGradient(0, 0, rect.width, rect.height);
+    background.addColorStop(0, "#04110f");
+    background.addColorStop(0.52, "#08231d");
+    background.addColorStop(1, "#160b09");
+    ctx.fillStyle = background;
     ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillStyle = "rgba(255, 247, 239, 0.045)";
+    for (let x = 0; x < rect.width; x += 64) ctx.fillRect(x, 0, 1, rect.height);
+    ctx.fillStyle = "rgba(255, 247, 239, 0.03)";
+    for (let y = 0; y < rect.height; y += 36) ctx.fillRect(0, y, rect.width, 1);
+    ctx.strokeStyle = "rgba(255, 247, 239, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, rect.height / 2);
+    ctx.lineTo(rect.width, rect.height / 2);
+    ctx.stroke();
 
     if (!audioBuffer) {
+      if (recordingPeaks.length) {
+        const mid = rect.height / 2;
+        const barWidth = rect.width / Math.max(48, recordingPeaks.length);
+        recordingPeaks.slice(-160).forEach((peak, index, peaks) => {
+          const x = index * (rect.width / Math.max(1, peaks.length - 1));
+          const height = Math.max(2, peak * rect.height * 1.8);
+          ctx.fillStyle = peak > 0.018 ? "rgba(53, 208, 139, 0.88)" : "rgba(255, 247, 239, 0.24)";
+          ctx.fillRect(x, mid - height / 2, Math.max(2, barWidth), height);
+        });
+        ctx.fillStyle = "#fff7ef";
+        ctx.font = "13px sans-serif";
+        ctx.fillText(recordingState === "armed" ? "waiting for audio" : "recording", 16, 26);
+        return;
+      }
       ctx.fillStyle = "#35d08b";
       ctx.font = "13px sans-serif";
       ctx.fillText("load or record audio", 16, rect.height / 2);
       return;
     }
 
+    slicePoints.slice(0, -1).forEach((start, index) => {
+      const end = slicePoints[index + 1];
+      const x = start * rect.width;
+      const width = Math.max(1, (end - start) * rect.width);
+      ctx.fillStyle = index === activeSlice
+        ? "rgba(241, 90, 59, 0.22)"
+        : index % 2
+          ? "rgba(53, 208, 139, 0.055)"
+          : "rgba(255, 247, 239, 0.035)";
+      ctx.fillRect(x, 0, width, rect.height);
+      ctx.fillStyle = "rgba(255, 247, 239, 0.72)";
+      ctx.font = "11px sans-serif";
+      ctx.fillText(String(index + 1).padStart(2, "0"), x + 8, rect.height - 12);
+    });
+
     const data = audioBuffer.getChannelData(0);
     const step = Math.max(1, Math.floor(data.length / rect.width));
     const mid = rect.height / 2;
-    ctx.strokeStyle = "#35d08b";
-    ctx.lineWidth = 1;
+    const waveGradient = ctx.createLinearGradient(0, 0, 0, rect.height);
+    waveGradient.addColorStop(0, "rgba(74, 255, 177, 0.92)");
+    waveGradient.addColorStop(0.5, "rgba(53, 208, 139, 0.58)");
+    waveGradient.addColorStop(1, "rgba(22, 112, 91, 0.88)");
+    ctx.strokeStyle = waveGradient;
+    ctx.lineWidth = 1.4;
+    ctx.shadowColor = "rgba(53, 208, 139, 0.42)";
+    ctx.shadowBlur = 8;
     ctx.beginPath();
     for (let x = 0; x < rect.width; x++) {
       let min = 1;
@@ -277,22 +531,40 @@ function SampleModal({
       ctx.lineTo(x, mid + max * mid * 0.88);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    ctx.strokeStyle = "#f15a3b";
-    ctx.lineWidth = 2;
     markers.forEach((marker, index) => {
       const x = marker * rect.width;
+      const selected = selectedMarker === index;
+      ctx.strokeStyle = selected ? "#fff7ef" : "#f15a3b";
+      ctx.lineWidth = selected ? 3 : 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, rect.height);
       ctx.stroke();
-      ctx.fillStyle = "#f15a3b";
-      ctx.fillRect(x - 8, 6, 16, 16);
-      ctx.fillStyle = "#fff7ef";
+      ctx.fillStyle = selected ? "#fff7ef" : "#f15a3b";
+      ctx.fillRect(x - 10, 7, 20, 18);
+      ctx.fillStyle = selected ? "#071b16" : "#fff7ef";
       ctx.font = "10px sans-serif";
-      ctx.fillText(String(index + 1), x - 3, 18);
+      ctx.fillText(String(index + 1), x - 3, 20);
     });
-  }, [audioBuffer, markers]);
+
+    if (playhead != null) {
+      const x = playhead * rect.width;
+      ctx.fillStyle = "rgba(245, 200, 75, 0.08)";
+      ctx.fillRect(0, 0, x, rect.height);
+      ctx.strokeStyle = "#f5c84b";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, rect.height);
+      ctx.stroke();
+      ctx.fillStyle = "#f5c84b";
+      ctx.beginPath();
+      ctx.arc(x, 14, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints]);
 
   useEffect(() => {
     if (!open) return;
@@ -303,8 +575,25 @@ function SampleModal({
 
   useEffect(() => () => {
     stopPlayback();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-  }, [stopPlayback]);
+    clearRecorder();
+  }, [clearRecorder, stopPlayback]);
+
+  useEffect(() => {
+    if (!open || !audioBuffer || !isPlaying) return;
+    let frame = 0;
+    const tick = () => {
+      const playback = playbackRef.current;
+      if (playback) {
+        const elapsed = playback.context.currentTime - playback.startedAt;
+        const position = playback.offset + elapsed;
+        const maxPosition = playback.duration ? playback.offset + playback.duration : audioBuffer.duration;
+        setPlayhead(Math.min(maxPosition, position) / audioBuffer.duration);
+        frame = window.requestAnimationFrame(tick);
+      }
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [audioBuffer, isPlaying, open]);
 
   async function loadBlob(blob: Blob, name = "audio") {
     stopPlayback();
@@ -313,10 +602,24 @@ function SampleModal({
       const decoded = await context.decodeAudioData(await blob.arrayBuffer());
       setAudioBuffer(decoded);
       setMarkers([]);
+      setSelectedMarker(null);
       setStatus(`Loaded ${name} (${decoded.duration.toFixed(2)}s)`);
     } finally {
       await context.close();
     }
+  }
+
+  function clearSample() {
+    stopPlayback();
+    if (recordingState !== "idle") stopRecording();
+    setAudioBuffer(null);
+    setMarkers([]);
+    setSelectedMarker(null);
+    setActiveSlice(null);
+    setPlayhead(null);
+    setRecordingPeaks([]);
+    chunksRef.current = [];
+    setStatus("Sample cleared");
   }
 
   async function startRecording() {
@@ -325,7 +628,9 @@ function SampleModal({
       return;
     }
     stopPlayback();
+    clearRecorder();
     chunksRef.current = [];
+    setRecordingPeaks([]);
     try {
       const stream = source === "mic"
         ? await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -336,35 +641,71 @@ function SampleModal({
         setStatus("No audio track selected");
         return;
       }
-      streamRef.current = new MediaStream(audioTracks);
-      const recorder = new MediaRecorder(streamRef.current);
+      streamRef.current = stream;
+      const audioOnlyStream = new MediaStream(audioTracks);
+      const recorder = new MediaRecorder(audioOnlyStream);
       recorderRef.current = recorder;
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       });
       recorder.addEventListener("stop", async () => {
         stream.getTracks().forEach((track) => track.stop());
-        streamRef.current?.getTracks().forEach((track) => track.stop());
+        stopRecordingMonitor();
         streamRef.current = null;
-        setRecording(false);
+        recorderRef.current = null;
+        setRecordingState("idle");
         if (!chunksRef.current.length) {
           setStatus("Nothing recorded");
           return;
         }
         await loadBlob(new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }), "recording");
       });
-      recorder.start();
-      setRecording(true);
-      setStatus(source === "mic" ? "Recording microphone" : "Recording shared audio");
+
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.35;
+      context.createMediaStreamSource(audioOnlyStream).connect(analyser);
+      recordingContextRef.current = context;
+      const data = new Float32Array(analyser.fftSize);
+      let hotFrames = 0;
+      setRecordingState("armed");
+      setStatus(source === "mic" ? "Armed: waiting for microphone audio" : "Armed: waiting for shared audio");
+
+      const monitor = () => {
+        analyser.getFloatTimeDomainData(data);
+        let sum = 0;
+        for (let index = 0; index < data.length; index++) {
+          const centered = data[index];
+          sum += centered * centered;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        setRecordingPeaks((current) => [...current.slice(-159), rms]);
+        hotFrames = rms > 0.014 ? hotFrames + 1 : 0;
+        if (hotFrames >= 3 && recorder.state === "inactive") {
+          recorder.start();
+          setRecordingState("recording");
+          setStatus(source === "mic" ? "Recording microphone" : "Recording shared audio");
+        }
+        recordingFrameRef.current = window.requestAnimationFrame(monitor);
+      };
+      recordingFrameRef.current = window.requestAnimationFrame(monitor);
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "Recording failed");
-      setRecording(false);
+      clearRecorder();
     }
   }
 
   function stopRecording() {
-    recorderRef.current?.state === "recording" ? recorderRef.current.stop() : undefined;
+    const recorder = recorderRef.current;
+    if (recorder?.state === "recording") {
+      recorder.stop();
+      return;
+    }
+    clearRecorder();
+    setRecordingPeaks([]);
+    setStatus("Recording cancelled");
   }
 
   function markerFromEvent(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -380,6 +721,42 @@ function SampleModal({
     return markers.findIndex((marker) => Math.abs(marker - position) * width <= 12);
   }
 
+  function addMarker(position: number, label = "chops") {
+    if (!audioBuffer || position <= 0.01 || position >= 0.99 || markers.length >= 11) return;
+    if (markers.some((marker) => Math.abs(marker - position) < 0.006)) return;
+    const rounded = Number(position.toFixed(4));
+    const next = [...markers, rounded].sort((a, b) => a - b);
+    setMarkers(next);
+    setSelectedMarker(next.findIndex((candidate) => candidate === rounded));
+    setStatus(`${next.length + 1} ${label}`);
+  }
+
+  function removeMarker(index: number | null) {
+    if (index == null || index < 0) return;
+    const next = markers.filter((_, markerIndex) => markerIndex !== index);
+    setMarkers(next);
+    setSelectedMarker(null);
+    setStatus(`${next.length + 1} chops`);
+  }
+
+  function setMarkerSlot(slotIndex: number, position: number, keyLabel: string) {
+    if (!audioBuffer) return;
+    if (slotIndex >= 11) {
+      setStatus("12 slices use 11 chop marks");
+      return;
+    }
+    const rounded = Number(Math.max(0.01, Math.min(0.99, position)).toFixed(4));
+    const next = [...markers];
+    next[slotIndex] = rounded;
+    const sorted = next
+      .filter((marker, index) => index === slotIndex || typeof marker === "number")
+      .slice(0, 11)
+      .sort((a, b) => a - b);
+    setMarkers(sorted);
+    setSelectedMarker(sorted.findIndex((marker) => marker === rounded));
+    setStatus(`Chop ${keyLabel} set at ${(rounded * audioBuffer.duration).toFixed(2)}s`);
+  }
+
   function pointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!audioBuffer || !canvasRef.current) return;
     const marker = markerFromEvent(event);
@@ -387,14 +764,11 @@ function SampleModal({
     canvasRef.current.setPointerCapture(event.pointerId);
     if (nearest >= 0) {
       setDraggingMarker(nearest);
+      setSelectedMarker(nearest);
       setStatus(`Dragging marker ${nearest + 1}`);
       return;
     }
-    if (marker <= 0.01 || marker >= 0.99 || markers.length >= 11) return;
-    const next = [...markers, Number(marker.toFixed(4))].sort((a, b) => a - b);
-    setMarkers(next);
-    setDraggingMarker(next.findIndex((candidate) => candidate === Number(marker.toFixed(4))));
-    setStatus(`${next.length + 1} chops`);
+    addMarker(marker);
   }
 
   function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -411,9 +785,18 @@ function SampleModal({
     setDraggingMarker(null);
   }
 
+  function removeMarkerFromEvent(event: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) {
+    if (!audioBuffer) return;
+    event.preventDefault();
+    const marker = markerFromEvent(event as React.PointerEvent<HTMLCanvasElement>);
+    const nearest = nearestMarkerIndex(marker);
+    if (nearest >= 0) removeMarker(nearest);
+  }
+
   function equalChops(count: number) {
     if (!audioBuffer) return;
     setMarkers(Array.from({ length: count - 1 }, (_, index) => (index + 1) / count));
+    setSelectedMarker(null);
     setStatus(`${count} equal chops`);
   }
 
@@ -440,10 +823,11 @@ function SampleModal({
       cooldown--;
     }
     setMarkers(next.slice(0, 11));
+    setSelectedMarker(null);
     setStatus(`${Math.min(next.length, 11) + 1} transient chops`);
   }
 
-  function play(start = 0, duration?: number) {
+  function play(start = 0, duration?: number, sliceIndex?: number) {
     if (!audioBuffer) return;
     stopPlayback();
     const context = new AudioContext();
@@ -453,10 +837,69 @@ function SampleModal({
     sourceNode.addEventListener("ended", () => {
       void context.close();
       playbackRef.current = null;
+      setPlayhead(null);
+      setActiveSlice(null);
+      setIsPlaying(false);
     });
     sourceNode.start(0, start, duration);
-    playbackRef.current = { context, source: sourceNode };
+    playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: start, duration };
+    setActiveSlice(sliceIndex ?? null);
+    setIsPlaying(true);
   }
+
+  function playSlice(index: number) {
+    const slice = slices[index];
+    if (!audioBuffer || !slice) return;
+    play(slice.start * audioBuffer.duration, slice.duration, index);
+    setStatus(`Playing slice ${String(index + 1).padStart(2, "0")}`);
+  }
+
+  function playbackPosition() {
+    const playback = playbackRef.current;
+    if (!playback) return null;
+    return playback.offset + playback.context.currentTime - playback.startedAt;
+  }
+
+  function fullSampleIsPlaying() {
+    return Boolean(playbackRef.current && playbackRef.current.duration == null);
+  }
+
+  function stampManualChop(markerIndex: number, keyLabel: string) {
+    if (!audioBuffer) return;
+    const position = playbackPosition();
+    if (position == null) {
+      setStatus("Start playback before manual chopping");
+      return;
+    }
+    setMarkerSlot(markerIndex, position / audioBuffer.duration, keyLabel);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      const keyIndex = samplerSliceKeys.findIndex((key) => key.code === event.code);
+      if (keyIndex >= 0) {
+        event.preventDefault();
+        if (mode === "manual" && fullSampleIsPlaying()) stampManualChop(keyIndex, samplerSliceKeys[keyIndex].label);
+        else playSlice(keyIndex);
+        return;
+      }
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedMarker != null) {
+        event.preventDefault();
+        removeMarker(selectedMarker);
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (playbackRef.current) stopPlayback();
+        else play();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mode, open, selectedMarker, stopPlayback, markers, audioBuffer, slices]);
 
   function encodeWav(channels: Float32Array[], sampleRate: number) {
     const channelCount = channels.length;
@@ -519,32 +962,45 @@ function SampleModal({
     onUpload(files, Number(pad?.number || 1));
   }
 
-  const slicePoints = [0, ...markers, 1].sort((a, b) => a - b);
-  const slices = slicePoints.slice(0, -1).map((start, index) => ({
-    index,
-    start,
-    end: slicePoints[index + 1],
-    duration: audioBuffer ? (slicePoints[index + 1] - start) * audioBuffer.duration : 0,
-  }));
-
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4">
-      <div className="w-full max-w-4xl overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl">
+      <div className="max-h-[94vh] w-full max-w-6xl overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b p-4">
-          <SectionTitle icon={AudioWaveform} title={`Sample Pad ${pad?.number || "--"}`} description="Capture, load, chop, and assign without leaving the workspace." />
+          <SectionTitle icon={AudioWaveform} title={`Sampler Pad ${pad?.number || "--"}`} description={`${slices.length} slice${slices.length === 1 ? "" : "s"} ready for keyboard playback and pad assignment.`} />
           <Button variant="secondary" onClick={onClose}>Close</Button>
         </div>
-        <div className="grid gap-4 p-4 lg:grid-cols-[1fr_260px]">
-          <div className="grid gap-4">
+        <div className="grid max-h-[calc(94vh-73px)] gap-4 overflow-auto p-4 xl:grid-cols-[1fr_310px]">
+          <div className="grid content-start gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: "edit", label: "Edit" },
+                  { value: "manual", label: "Manual Chop" },
+                  { value: "perform", label: "Perform" },
+                ].map((option) => (
+                  <Button
+                    key={option.value}
+                    variant={mode === option.value ? "default" : "outline"}
+                    onClick={() => setMode(option.value as typeof mode)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {audioBuffer ? `${audioBuffer.duration.toFixed(2)}s / ${audioBuffer.sampleRate} Hz` : status}
+              </div>
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button variant={source === "system" ? "default" : "outline"} onClick={() => setSource("system")}>System</Button>
               <Button variant={source === "mic" ? "default" : "outline"} onClick={() => setSource("mic")}>Mic</Button>
-              <Button onClick={recording ? stopRecording : startRecording}><Mic2 className="h-4 w-4" /> {recording ? "Stop" : "Record"}</Button>
+              <Button onClick={recordingState === "idle" ? startRecording : stopRecording}><Mic2 className="h-4 w-4" /> {recordingState === "recording" ? "Stop" : recordingState === "armed" ? "Cancel" : "Record"}</Button>
               <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
               <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect chops</Button>
-              <Button variant="outline" onClick={() => play()}>Play</Button>
+              <Button variant="outline" onClick={() => isPlaying ? stopPlayback() : play()}>{isPlaying ? "Stop" : "Play"}</Button>
+              <Button variant="outline" onClick={clearSample}><Trash2 className="h-4 w-4" /> Clear sample</Button>
               <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
               <input
                 ref={fileInput}
@@ -564,30 +1020,113 @@ function SampleModal({
               onPointerMove={pointerMove}
               onPointerUp={pointerUp}
               onPointerCancel={pointerUp}
-              className="h-72 w-full touch-none rounded-lg border bg-zinc-950"
+              onDoubleClick={removeMarkerFromEvent}
+              onContextMenu={removeMarkerFromEvent}
+              className="h-[360px] w-full touch-none rounded-lg border bg-zinc-950 shadow-inner"
             />
-            <div className="text-sm text-muted-foreground">{status}</div>
+            <div className="grid grid-cols-6 gap-2 sm:grid-cols-12">
+              {samplerSliceKeys.map((key, index) => {
+                const slice = slices[index];
+                return (
+                  <button
+                    key={key.code}
+                    className={cn(
+                      "grid h-16 content-center rounded-md border bg-background px-2 text-left text-xs hover:border-primary disabled:opacity-45",
+                      activeSlice === index && "border-primary bg-primary/10",
+                    )}
+                    onClick={() => mode === "manual" && fullSampleIsPlaying() ? stampManualChop(index, key.label) : playSlice(index)}
+                    disabled={!audioBuffer || (mode === "manual" ? (!fullSampleIsPlaying() && !slice) : !slice)}
+                  >
+                    <span className="text-sm font-semibold">{key.label}</span>
+                    <span className="truncate text-muted-foreground">{slice ? `Slice ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
+                    <span className="text-muted-foreground">{slice ? `${slice.duration.toFixed(2)}s` : `Pad ${Number(pad?.number || 1) + index}`}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+              <span>{status}</span>
+              <span>{mode === "manual" ? "Space starts/stops. During playback, keys overwrite chop marks; stopped keys play slices." : "Space starts/stops. Keys 1-0, ß, ´ play slices."}</span>
+            </div>
           </div>
           <div className="grid content-start gap-3">
-            <Button variant="outline" className="justify-start" onClick={() => equalChops(4)}><Scissors className="h-4 w-4" /> 4 equal chops</Button>
-            <Button variant="outline" className="justify-start" onClick={() => equalChops(8)}><Scissors className="h-4 w-4" /> 8 equal chops</Button>
-            <Button variant="outline" className="justify-start" onClick={() => equalChops(12)}><Scissors className="h-4 w-4" /> 12 equal chops</Button>
-            <Button variant="outline" className="justify-start" onClick={() => setMarkers([])}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
-            <div className="grid max-h-44 gap-2 overflow-auto rounded-lg border bg-muted/25 p-2">
+            <div className="grid gap-2 rounded-lg border bg-muted/25 p-3">
+              <div className="text-sm font-semibold">Chop</div>
+              <div className="grid grid-cols-3 gap-2">
+                <Button variant="outline" onClick={() => equalChops(4)}>4</Button>
+                <Button variant="outline" onClick={() => equalChops(8)}>8</Button>
+                <Button variant="outline" onClick={() => equalChops(12)}>12</Button>
+              </div>
+              <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Detect transients</Button>
+              <Button variant="outline" className="justify-start" onClick={() => removeMarker(selectedMarker)} disabled={selectedMarker == null}><Trash2 className="h-4 w-4" /> Remove marker</Button>
+              <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
+            </div>
+
+            <div className="grid gap-2 rounded-lg border bg-muted/25 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Process</div>
+                <Switch checked={settings.enabled} onCheckedChange={(checked) => updateSetting("enabled", checked)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {samplerProcessToggles.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    className={cn(
+                      "rounded-md border bg-background px-2 py-2 text-left text-xs",
+                      settings[key] && "border-primary bg-primary/10",
+                    )}
+                    onClick={() => updateSetting(key, !settings[key])}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Bit rate
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lofiSampleRate} onChange={(event) => updateSetting("lofiSampleRate", event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Bit depth
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lofiBitDepth} onChange={(event) => updateSetting("lofiBitDepth", event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Low cut
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lowCutHz} onChange={(event) => updateSetting("lowCutHz", event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  High cut
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.highCutHz} onChange={(event) => updateSetting("highCutHz", event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Gain
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.gainDb} onChange={(event) => updateSetting("gainDb", event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Target dB
+                  <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.targetDb} onChange={(event) => updateSetting("targetDb", event.target.value)} />
+                </label>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                These settings apply when assigning chops to pads.
+              </div>
+            </div>
+
+            <div className="grid max-h-48 gap-2 overflow-auto rounded-lg border bg-muted/25 p-2">
               {slices.map((slice) => (
                 <button
                   key={`${slice.start}-${slice.end}`}
-                  className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs hover:border-primary"
-                  onClick={() => play(slice.start * (audioBuffer?.duration || 0), slice.duration)}
+                  className={cn(
+                    "flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs hover:border-primary",
+                    activeSlice === slice.index && "border-primary bg-primary/10",
+                  )}
+                  onClick={() => playSlice(slice.index)}
                   disabled={!audioBuffer}
                 >
-                  <span>Slice {String(slice.index + 1).padStart(2, "0")}</span>
+                  <span>{samplerSliceKeys[slice.index]?.label || slice.index + 1} · Slice {String(slice.index + 1).padStart(2, "0")}</span>
                   <span className="text-muted-foreground">{slice.duration.toFixed(2)}s</span>
                 </button>
               ))}
-            </div>
-            <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-              Click to add markers, drag markers to adjust, and click a slice to audition it before assigning from pad {Number(pad?.number || 1)}.
             </div>
           </div>
         </div>
@@ -889,6 +1428,8 @@ function Workspace({
   setSelectedPad,
   settings,
   setSettings,
+  padUploadSlotChoice,
+  setPadUploadSlotChoice,
   onOpenSampler,
 }: {
   engine: DeviceEngine;
@@ -896,6 +1437,8 @@ function Workspace({
   setSelectedPad: (pad: string) => void;
   settings: SampleSettings;
   setSettings: (settings: SampleSettings) => void;
+  padUploadSlotChoice: PadUploadSlotChoice;
+  setPadUploadSlotChoice: (choice: PadUploadSlotChoice) => void;
   onOpenSampler: () => void;
 }) {
   const kitImportInput = useRef<HTMLInputElement | null>(null);
@@ -905,10 +1448,12 @@ function Workspace({
 
   const uploadFiles = useCallback(
     async (files: File[], targetPads?: Pad[]) => {
-      if (!files.length) return;
-      await engine.uploadToPads(files, targetPads || engine.pads);
+      const pads = targetPads || engine.pads;
+      const upload = preparePadUpload(files, pads, engine, padUploadSlotChoice);
+      if (!upload) return;
+      await engine.uploadToPads(upload.files, upload.pads, upload.slotTarget);
     },
-    [engine],
+    [engine, padUploadSlotChoice],
   );
 
   const saveSnapshot = () => {
@@ -1075,6 +1620,7 @@ function Workspace({
           </CardContent>
         </Card>
 
+        <PadUploadSlotPanel choice={padUploadSlotChoice} setChoice={setPadUploadSlotChoice} />
         <SampleSettingsPanel settings={settings} setSettings={setSettings} />
       </div>
     </div>
@@ -1166,6 +1712,7 @@ export function App() {
   const [view, setView] = useState<"project" | "library">("project");
   const [selectedPad, setSelectedPad] = useState("01");
   const [settings, setSettings] = useState<SampleSettings>(() => loadInitialSampleSettings());
+  const [padUploadSlotChoice, setPadUploadSlotChoice] = useState<PadUploadSlotChoice>(() => defaultPadUploadSlotChoice);
   const [samplerOpen, setSamplerOpen] = useState(false);
   const selected = engine.pads.find((pad) => pad.number === selectedPad);
 
@@ -1235,6 +1782,8 @@ export function App() {
               setSelectedPad={setSelectedPad}
               settings={settings}
               setSettings={setSettings}
+              padUploadSlotChoice={padUploadSlotChoice}
+              setPadUploadSlotChoice={setPadUploadSlotChoice}
               onOpenSampler={() => setSamplerOpen(true)}
             />
           ) : (
@@ -1245,9 +1794,13 @@ export function App() {
       <SampleModal
         open={samplerOpen}
         pad={selected}
+        settings={settings}
+        setSettings={setSettings}
         onClose={() => setSamplerOpen(false)}
         onUpload={(files, startPad) => {
-          void engine.uploadToPads(files, engine.pads.slice(startPad - 1, startPad - 1 + files.length));
+          const upload = preparePadUpload(files, engine.pads.slice(startPad - 1, startPad - 1 + files.length), engine, padUploadSlotChoice);
+          if (!upload) return;
+          void engine.uploadToPads(upload.files, upload.pads, upload.slotTarget);
           setSamplerOpen(false);
         }}
       />

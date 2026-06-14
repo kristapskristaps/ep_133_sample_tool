@@ -18,6 +18,12 @@ export type NativeSound = NativeNode & {
   meta: Record<string, unknown>;
 };
 
+type SoundUploadOptions = {
+  startSlot?: number;
+  endSlot?: number;
+  exact?: boolean;
+};
+
 type KitManifest = {
   version: 1;
   createdAt: string;
@@ -239,10 +245,10 @@ export class NativeDeviceService {
     return result;
   }
 
-  async findNextFreeSoundSlot(startId = 1) {
+  async findNextFreeSoundSlot(startId = 1, endId = 999) {
     const sounds = await this.listSounds();
     const used = new Set(sounds.map((sound) => sound.id));
-    for (let id = Math.max(1, startId); id <= 999; id++) {
+    for (let id = Math.max(1, startId); id <= Math.min(999, endId); id++) {
       if (!used.has(id)) return id;
     }
     return -1;
@@ -268,12 +274,14 @@ export class NativeDeviceService {
     };
   }
 
-  async uploadSounds(files: File[], onProgress?: (file: File, current: number, total: number) => void) {
+  async uploadSounds(files: File[], onProgress?: (file: File, current: number, total: number) => void, options: SoundUploadOptions = {}) {
     const uploaded: Array<{ id: number; path: string; name: string }> = [];
-    let cursor = 1;
+    let cursor = Math.max(1, options.startSlot || 1);
+    const endSlot = Math.min(999, options.endSlot || 999);
     for (const file of files) {
-      const slot = await this.findNextFreeSoundSlot(cursor);
+      const slot = options.exact ? cursor : await this.findNextFreeSoundSlot(cursor, endSlot);
       if (slot === -1) throw new Error("no free sound slots");
+      if (slot > endSlot) throw new Error(`no free sound slots through ${String(endSlot).padStart(3, "0")}`);
       uploaded.push(await this.uploadSound(file, slot, (current, total) => onProgress?.(file, current, total)));
       cursor = slot + 1;
     }
@@ -290,8 +298,8 @@ export class NativeDeviceService {
     return uploaded;
   }
 
-  async uploadSoundsToPads(files: File[], padPaths: string[], onProgress?: (file: File, current: number, total: number) => void) {
-    const uploaded = await this.uploadSounds(files.slice(0, padPaths.length), onProgress);
+  async uploadSoundsToPads(files: File[], padPaths: string[], onProgress?: (file: File, current: number, total: number) => void, options: SoundUploadOptions = {}) {
+    const uploaded = await this.uploadSounds(files.slice(0, padPaths.length), onProgress, options);
     for (let index = 0; index < uploaded.length; index++) {
       await this.assignSound(uploaded[index].path, padPaths[index]);
     }
