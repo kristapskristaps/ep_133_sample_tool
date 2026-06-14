@@ -32,6 +32,15 @@ function cleanSoundName(name: string) {
   return name.replace(/^\d{1,3}\s*/, "").replace(/\.pcm$/i, "").trim();
 }
 
+function normalizeProjectName(name?: string) {
+  const value = Number(name);
+  return Number.isFinite(value) && value > 0 ? String(value).padStart(2, "0") : name || "";
+}
+
+function normalizeGroupName(name?: string) {
+  return (name || "").toUpperCase();
+}
+
 function metadataString(meta: Record<string, unknown> | undefined, key: string) {
   const value = meta?.[key];
   return typeof value === "string" ? value.trim() : "";
@@ -62,6 +71,10 @@ function storageBytesForUsage(deviceStorageBytes: number | undefined, usedBytes:
   const base = deviceStorageBytes || DEFAULT_SAMPLE_STORAGE_BYTES;
   if (usedBytes > DEFAULT_SAMPLE_STORAGE_BYTES && base < EXTENDED_SAMPLE_STORAGE_BYTES) return EXTENDED_SAMPLE_STORAGE_BYTES;
   return base;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function initialState(): EngineState {
@@ -143,12 +156,14 @@ export function useDeviceEngine(): DeviceEngine {
     const storageBytes = storageBytesForUsage(storageBytesRef.current, usedBytes);
     storageBytesRef.current = storageBytes;
     const memoryUsedPercent = Math.round((usedBytes / storageBytes) * 100);
+    const activeProjectName = normalizeProjectName(activeProject?.node.name);
+    const activeGroupName = normalizeGroupName(activeGroup?.node.name);
     setState((current) => ({
       ...current,
       connected: true,
-      target: activeProject && activeGroup ? `P${activeProject.node.name} / ${activeGroup.node.name}` : "Select target",
-      activeProject: activeProject?.node.name || "",
-      activeGroup: activeGroup?.node.name || "",
+      target: activeProjectName && activeGroupName ? `P${activeProjectName} / ${activeGroupName}` : "Select target",
+      activeProject: activeProjectName,
+      activeGroup: activeGroupName,
       pads,
       sounds,
       memory: `${formatBytes(usedBytes)} / ${formatBytes(storageBytes)}`,
@@ -247,6 +262,12 @@ export function useDeviceEngine(): DeviceEngine {
       }
       setState((current) => ({ ...current, status: `Switching to project ${project}` }));
       await service.setActiveProject(project);
+      await wait(250);
+      setState((current) => ({
+        ...current,
+        activeProject: normalizeProjectName(project),
+        target: `P${normalizeProjectName(project)} / ${current.activeGroup || "A"}`,
+      }));
     }),
     setGroup: (group: string) => runNative(async (service) => {
       if (!ENABLE_NATIVE_TARGET_SWITCH) {
@@ -258,6 +279,12 @@ export function useDeviceEngine(): DeviceEngine {
       }
       setState((current) => ({ ...current, status: `Switching to group ${group}` }));
       await service.setActiveGroup(group);
+      await wait(250);
+      setState((current) => ({
+        ...current,
+        activeGroup: normalizeGroupName(group),
+        target: `${current.activeProject ? `P${current.activeProject}` : "P--"} / ${normalizeGroupName(group)}`,
+      }));
     }),
     uploadToPads: (files: File[], pads: Pad[]) => runNative(async (service) => {
       setState((current) => ({ ...current, uploading: true, status: `Preparing ${files.length} sample${files.length === 1 ? "" : "s"}` }));
