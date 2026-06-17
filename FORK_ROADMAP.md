@@ -161,8 +161,9 @@ Implemented:
 - Draw a waveform for the loaded/recorded audio.
 - Draw live recording input level while armed or recording.
 - Add manual chop markers by clicking the waveform.
-- Toggle chop markers directly from the waveform: click empty waveform space to add the next marker, click an existing marker to remove it and renumber.
-- Select chop markers and remove them with the Delete/Backspace key or the sampler controls.
+- Select and drag chop markers directly on the waveform.
+- Move selected chop markers with left/right arrow keys.
+- Remove chop markers from the marker hover `x`, with automatic renumbering.
 - Generate 4, 8, or 12 equal chops.
 - Autochop suggestion from amplitude onsets with selectable threshold and predicted chop count.
 - Keyboard chop workflow treats `1` as the sample start and `2`-`´` as later chop starts that can be added or overwritten during playback.

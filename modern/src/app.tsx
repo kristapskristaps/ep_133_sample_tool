@@ -394,6 +394,8 @@ function SampleModal({
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [markers, setMarkers] = useState<number[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<number | null>(null);
+  const [draggingMarker, setDraggingMarker] = useState<number | null>(null);
   const [activeSlice, setActiveSlice] = useState<number | null>(null);
   const [playhead, setPlayhead] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -594,17 +596,28 @@ function SampleModal({
       if (marker < viewStart || marker > viewEnd) return;
       const x = timeToX(marker);
       const selected = selectedMarker === index;
+      const hovered = hoveredMarker === index;
       ctx.strokeStyle = selected ? "#fff7ef" : "#f15a3b";
       ctx.lineWidth = selected ? 3 : 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, rect.height);
       ctx.stroke();
-      ctx.fillStyle = selected ? "#fff7ef" : "#f15a3b";
+      ctx.fillStyle = selected ? "#fff7ef" : hovered ? "#f58b72" : "#f15a3b";
       ctx.fillRect(x - 10, 7, 20, 18);
       ctx.fillStyle = selected ? "#071b16" : "#fff7ef";
       ctx.font = "10px sans-serif";
       ctx.fillText(String(index + 2), x - 3, 20);
+      if (hovered || selected) {
+        ctx.fillStyle = "rgba(7, 27, 22, 0.92)";
+        ctx.fillRect(x + 12, 7, 18, 18);
+        ctx.strokeStyle = "#f15a3b";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 12, 7, 18, 18);
+        ctx.fillStyle = "#fff7ef";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("x", x + 18, 20);
+      }
     });
 
     if (startChopSet) {
@@ -660,7 +673,7 @@ function SampleModal({
         ctx.fill();
       }
     }
-  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet, trimEnd, trimStart, viewEnd, viewStart]);
+  }, [activeSlice, audioBuffer, hoveredMarker, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet, trimEnd, trimStart, viewEnd, viewStart]);
 
   useEffect(() => {
     if (!open) return;
@@ -861,11 +874,33 @@ function SampleModal({
     return Math.max(0, Math.min(1, viewStart + visiblePosition * (viewEnd - viewStart)));
   }
 
+  function canvasPointFromEvent(event: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return {
+      x: rect ? event.clientX - rect.left : 0,
+      y: rect ? event.clientY - rect.top : 0,
+      width: rect?.width || 1,
+    };
+  }
+
+  function markerX(marker: number, width: number) {
+    return ((marker - viewStart) / Math.max(0.001, viewEnd - viewStart)) * width;
+  }
+
   function nearestMarkerIndex(position: number) {
     const canvas = canvasRef.current;
     if (!canvas) return -1;
     const width = Math.max(1, canvas.getBoundingClientRect().width);
     return markers.findIndex((marker) => Math.abs(marker - position) / Math.max(0.001, viewEnd - viewStart) * width <= 12);
+  }
+
+  function markerDeleteIndexFromEvent(event: React.PointerEvent<HTMLCanvasElement>) {
+    const point = canvasPointFromEvent(event);
+    return markers.findIndex((marker) => {
+      if (marker < viewStart || marker > viewEnd) return false;
+      const x = markerX(marker, point.width);
+      return point.x >= x + 12 && point.x <= x + 30 && point.y >= 7 && point.y <= 25;
+    });
   }
 
   function nearestTrimHandle(position: number) {
@@ -920,6 +955,11 @@ function SampleModal({
   function pointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!audioBuffer || !canvasRef.current) return;
     const marker = markerFromEvent(event);
+    const deleteIndex = markerDeleteIndexFromEvent(event);
+    if (deleteIndex >= 0) {
+      removeMarker(deleteIndex);
+      return;
+    }
     const nearest = nearestMarkerIndex(marker);
     canvasRef.current.setPointerCapture(event.pointerId);
     const trimHandle = nearestTrimHandle(marker);
@@ -929,31 +969,48 @@ function SampleModal({
       return;
     }
     if (nearest >= 0) {
-      removeMarker(nearest);
+      setSelectedMarker(nearest);
+      setHoveredMarker(nearest);
+      setDraggingMarker(nearest);
+      setStatus(`Selected chop ${nearest + 2}`);
       return;
     }
     addMarker(marker);
   }
 
   function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!audioBuffer || !draggingTrim) return;
+    if (!audioBuffer) return;
     const position = markerFromEvent(event);
+    if (draggingMarker != null) {
+      const previous = markers[draggingMarker - 1] ?? trimStart;
+      const next = markers[draggingMarker + 1] ?? trimEnd;
+      const moved = Number(Math.max(previous + 0.005, Math.min(next - 0.005, position)).toFixed(4));
+      setMarkers((current) => current.map((marker, index) => index === draggingMarker ? moved : marker));
+      setStatus(`Moved chop ${draggingMarker + 2} to ${(moved * audioBuffer.duration).toFixed(2)}s`);
+      return;
+    }
     if (draggingTrim === "start") {
       const next = Math.max(0, Math.min(trimEnd - 0.01, position));
       setTrimStart(Number(next.toFixed(4)));
       setMarkers((current) => current.filter((marker) => marker > next && marker < trimEnd));
       setStatus(`Trim start ${(next * (audioBuffer?.duration || 0)).toFixed(2)}s`);
-    } else {
+      return;
+    }
+    if (draggingTrim === "end") {
       const next = Math.min(1, Math.max(trimStart + 0.01, position));
       setTrimEnd(Number(next.toFixed(4)));
       setMarkers((current) => current.filter((marker) => marker > trimStart && marker < next));
       setStatus(`Trim end ${(next * (audioBuffer?.duration || 0)).toFixed(2)}s`);
+      return;
     }
+    const nearest = nearestMarkerIndex(position);
+    setHoveredMarker(nearest >= 0 ? nearest : null);
   }
 
   function pointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     canvasRef.current?.releasePointerCapture(event.pointerId);
     setDraggingTrim(null);
+    setDraggingMarker(null);
   }
 
   function equalChops(count: number) {
@@ -1018,6 +1075,19 @@ function SampleModal({
     setMarkerSlot(markerIndex, position / audioBuffer.duration, keyLabel);
   }
 
+  function moveSelectedMarker(direction: -1 | 1, coarse = false) {
+    if (!audioBuffer || selectedMarker == null) return;
+    const step = (viewEnd - viewStart) / (coarse ? 60 : 600);
+    setMarkers((current) => {
+      const previous = current[selectedMarker - 1] ?? trimStart;
+      const next = current[selectedMarker + 1] ?? trimEnd;
+      const moved = Number(Math.max(previous + 0.001, Math.min(next - 0.001, current[selectedMarker] + direction * step)).toFixed(4));
+      const updated = current.map((marker, index) => index === selectedMarker ? moved : marker);
+      setStatus(`Moved chop ${selectedMarker + 2} to ${(moved * audioBuffer.duration).toFixed(2)}s`);
+      return updated;
+    });
+  }
+
   function handleChopKey(keyIndex: number, keyLabel: string) {
     if (!audioBuffer) return;
     if (keyIndex === 0) {
@@ -1030,11 +1100,17 @@ function SampleModal({
       playSlice(0);
       return;
     }
-    if (playbackRef.current) {
+    const existingChopCount = startChopSet ? slices.length : 0;
+    const redoMarkerIndex = Math.max(0, existingChopCount - 2);
+    if (playbackRef.current && startChopSet && keyIndex === existingChopCount - 1 && existingChopCount > 1) {
+      stampChopMarker(redoMarkerIndex, keyLabel);
+      return;
+    }
+    if (playbackRef.current && (!startChopSet || keyIndex >= existingChopCount)) {
       stampChopMarker(keyIndex - 1, keyLabel);
       return;
     }
-    if (startChopSet && slices[keyIndex]) {
+    if (startChopSet && keyIndex < existingChopCount && slices[keyIndex]) {
       playSlice(keyIndex);
       return;
     }
@@ -1052,9 +1128,9 @@ function SampleModal({
         handleChopKey(keyIndex, samplerSliceKeys[keyIndex].label);
         return;
       }
-      if ((event.key === "Backspace" || event.key === "Delete") && selectedMarker != null) {
+      if ((event.code === "ArrowLeft" || event.code === "ArrowRight") && selectedMarker != null) {
         event.preventDefault();
-        removeMarker(selectedMarker);
+        moveSelectedMarker(event.code === "ArrowLeft" ? -1 : 1, event.shiftKey);
         return;
       }
       if (event.code === "Space") {
@@ -1065,7 +1141,7 @@ function SampleModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [audioBuffer, markers, open, selectedMarker, slices, startChopSet, stopPlayback]);
+  }, [audioBuffer, markers, open, selectedMarker, slices, startChopSet, stopPlayback, trimEnd, trimStart, viewEnd, viewStart]);
 
   function encodeWav(channels: Float32Array[], sampleRate: number) {
     const channelCount = channels.length;
@@ -1194,6 +1270,7 @@ function SampleModal({
               onPointerMove={pointerMove}
               onPointerUp={pointerUp}
               onPointerCancel={pointerUp}
+              onPointerLeave={() => setHoveredMarker(null)}
               className="h-[360px] w-full touch-none rounded-lg border bg-zinc-950 shadow-inner"
             />
             <div className="grid gap-3 rounded-lg border bg-muted/25 p-3">
@@ -1310,7 +1387,6 @@ function SampleModal({
                 </div>
               </div>
               <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
-              <Button variant="outline" className="justify-start" onClick={() => removeMarker(selectedMarker)} disabled={selectedMarker == null}><Trash2 className="h-4 w-4" /> Remove marker</Button>
               <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); setStartChopSet(false); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
             </div>
 
