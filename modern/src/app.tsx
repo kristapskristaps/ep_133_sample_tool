@@ -399,7 +399,7 @@ function SampleModal({
 }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number; duration?: number } | null>(null);
+  const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number; duration?: number; reverse?: boolean } | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingContextRef = useRef<AudioContext | null>(null);
   const recordingFrameRef = useRef<number | null>(null);
@@ -423,6 +423,7 @@ function SampleModal({
   const [pan, setPan] = useState(0);
   const [draggingTrim, setDraggingTrim] = useState<"start" | "end" | null>(null);
   const [sliceNames, setSliceNames] = useState<Record<number, string>>({});
+  const [reversedSlices, setReversedSlices] = useState<Record<number, boolean>>({});
   const [status, setStatus] = useState("Load or record audio");
   const [recordingState, setRecordingState] = useState<"idle" | "armed" | "recording">("idle");
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
@@ -477,7 +478,9 @@ function SampleModal({
     end: slicePoints[index + 1],
     duration: audioBuffer ? (slicePoints[index + 1] - start) * audioBuffer.duration : 0,
     name: sliceNames[index] || `sample_chop_${String(index + 1).padStart(2, "0")}`,
+    reversed: Boolean(reversedSlices[index]),
   }));
+  const focusedSliceIndex = activeSlice ?? (selectedMarker != null ? selectedMarker + 1 : null);
 
   const updateSetting = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
     setSettings({ ...settings, [key]: value });
@@ -601,6 +604,21 @@ function SampleModal({
       ctx.fillStyle = "rgba(255, 247, 239, 0.72)";
       ctx.font = "11px sans-serif";
       ctx.fillText(String(index + 1).padStart(2, "0"), x + 8, rect.height - 12);
+      if (reversedSlices[index]) {
+        ctx.strokeStyle = "rgba(245, 200, 75, 0.34)";
+        ctx.lineWidth = 1;
+        for (let hatchX = x - rect.height; hatchX < x + width; hatchX += 14) {
+          ctx.beginPath();
+          ctx.moveTo(hatchX, rect.height);
+          ctx.lineTo(hatchX + rect.height, 0);
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#f5c84b";
+        ctx.fillRect(x + 30, rect.height - 27, 18, 16);
+        ctx.fillStyle = "#071b16";
+        ctx.font = "10px sans-serif";
+        ctx.fillText("R", x + 36, rect.height - 15);
+      }
     });
 
     const data = audioBuffer.getChannelData(0);
@@ -713,7 +731,7 @@ function SampleModal({
         ctx.fill();
       }
     }
-  }, [activeSlice, audioBuffer, hoveredMarker, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet, trimEnd, trimStart, viewEnd, viewStart]);
+  }, [activeSlice, audioBuffer, hoveredMarker, markers, playhead, recordingPeaks, recordingState, reversedSlices, selectedMarker, slicePoints, startChopSet, trimEnd, trimStart, viewEnd, viewStart]);
 
   useEffect(() => {
     if (!open) return;
@@ -726,7 +744,8 @@ function SampleModal({
     setMarkers((current) => current.slice(0, maxMarkers));
     setSelectedMarker((current) => current != null && current >= maxMarkers ? null : current);
     setHoveredMarker((current) => current != null && current >= maxMarkers ? null : current);
-  }, [maxMarkers]);
+    setReversedSlices((current) => Object.fromEntries(Object.entries(current).filter(([sliceIndex]) => Number(sliceIndex) < maxChops)));
+  }, [maxChops, maxMarkers]);
 
   useEffect(() => () => {
     stopPlayback();
@@ -740,9 +759,11 @@ function SampleModal({
       const playback = playbackRef.current;
       if (playback) {
         const elapsed = playback.context.currentTime - playback.startedAt;
-        const position = playback.offset + elapsed;
+        const position = playback.reverse && playback.duration
+          ? playback.offset + Math.max(0, playback.duration - elapsed)
+          : playback.offset + elapsed;
         const maxPosition = playback.duration ? playback.offset + playback.duration : audioBuffer.duration;
-        setPlayhead(Math.min(maxPosition, position) / audioBuffer.duration);
+        setPlayhead(Math.max(0, Math.min(maxPosition, position)) / audioBuffer.duration);
         frame = window.requestAnimationFrame(tick);
       }
     };
@@ -771,6 +792,7 @@ function SampleModal({
     setZoom(1);
     setPan(0);
     setSliceNames({});
+    setReversedSlices({});
     setStatus(`Loaded ${name} (${buffer.duration.toFixed(2)}s)`);
   }
 
@@ -807,6 +829,7 @@ function SampleModal({
     setZoom(1);
     setPan(0);
     setSliceNames({});
+    setReversedSlices({});
     setRecordingPeaks([]);
     recordingChunksRef.current = [];
     recordingStartedRef.current = false;
@@ -975,6 +998,15 @@ function SampleModal({
     if (index == null || index < 0) return;
     const next = markers.filter((_, markerIndex) => markerIndex !== index);
     setMarkers(next);
+    setReversedSlices((current) => {
+      const updated: Record<number, boolean> = {};
+      Object.entries(current).forEach(([sliceKey, reversed]) => {
+        const sliceIndex = Number(sliceKey);
+        if (!reversed || sliceIndex === index + 1) return;
+        updated[sliceIndex > index + 1 ? sliceIndex - 1 : sliceIndex] = true;
+      });
+      return updated;
+    });
     setSelectedMarker(null);
     setStatus(`${next.length + 1} chops`);
   }
@@ -1066,6 +1098,7 @@ function SampleModal({
     setMarkers(Array.from({ length: safeCount - 1 }, (_, index) => trimStart + ((index + 1) / safeCount) * length));
     setSelectedMarker(null);
     setStartChopSet(true);
+    setReversedSlices({});
     setStatus(`${safeCount} equal chops`);
   }
 
@@ -1074,6 +1107,7 @@ function SampleModal({
     setMarkers(autoChopMarkers);
     setSelectedMarker(null);
     setStartChopSet(true);
+    setReversedSlices({});
     setStatus(`${autoChopMarkers.length + 1} autochops at threshold ${autoChopSensitivity}`);
   }
 
@@ -1083,24 +1117,27 @@ function SampleModal({
     return Math.round(((sample + 1) / 2) * (steps - 1)) / (steps - 1) * 2 - 1;
   }
 
-  function copySegmentBuffer(startSeconds: number, durationSeconds: number, sampleRate: number) {
+  function copySegmentBuffer(startSeconds: number, durationSeconds: number, sampleRate: number, reverse = false) {
     if (!audioBuffer) return null;
     const channelCount = settings.mono ? 1 : Math.min(2, audioBuffer.numberOfChannels);
     const length = Math.max(1, Math.floor(durationSeconds * sampleRate));
     const buffer = new AudioBuffer({ length, numberOfChannels: channelCount, sampleRate });
     const sourceStart = Math.max(0, Math.floor(startSeconds * audioBuffer.sampleRate));
+    const sourceFrameCount = Math.max(1, Math.floor(durationSeconds * audioBuffer.sampleRate));
     for (let channel = 0; channel < channelCount; channel++) {
       const output = buffer.getChannelData(channel);
       const sourceChannel = audioBuffer.getChannelData(Math.min(channel, audioBuffer.numberOfChannels - 1));
       if (settings.mono && audioBuffer.numberOfChannels > 1) {
         const otherChannel = audioBuffer.getChannelData(1);
         for (let frame = 0; frame < length; frame++) {
-          const sourceFrame = sourceStart + Math.floor((frame / sampleRate) * audioBuffer.sampleRate);
+          const relativeFrame = Math.min(sourceFrameCount - 1, Math.floor((frame / sampleRate) * audioBuffer.sampleRate));
+          const sourceFrame = sourceStart + (reverse ? sourceFrameCount - 1 - relativeFrame : relativeFrame);
           output[frame] = ((sourceChannel[sourceFrame] || 0) + (otherChannel[sourceFrame] || 0)) / 2;
         }
       } else {
         for (let frame = 0; frame < length; frame++) {
-          const sourceFrame = sourceStart + Math.floor((frame / sampleRate) * audioBuffer.sampleRate);
+          const relativeFrame = Math.min(sourceFrameCount - 1, Math.floor((frame / sampleRate) * audioBuffer.sampleRate));
+          const sourceFrame = sourceStart + (reverse ? sourceFrameCount - 1 - relativeFrame : relativeFrame);
           output[frame] = sourceChannel[sourceFrame] || 0;
         }
       }
@@ -1108,13 +1145,14 @@ function SampleModal({
     return buffer;
   }
 
-  async function renderPreviewBuffer(startSeconds: number, durationSeconds: number) {
-    if (!audioBuffer || !settings.enabled) return null;
+  async function renderPreviewBuffer(startSeconds: number, durationSeconds: number, reverse = false) {
+    if (!audioBuffer || (!settings.enabled && !reverse)) return null;
     const lofiProfile = lofiProfiles[settings.lofiMode] || lofiProfiles.soft;
     const lofiSampleRate = Math.max(3000, Math.min(audioBuffer.sampleRate, Number(settings.lofiSampleRate) || lofiProfile.sampleRate));
-    const renderRate = settings.lofi ? lofiSampleRate : audioBuffer.sampleRate;
-    const sourceBuffer = copySegmentBuffer(startSeconds, durationSeconds, renderRate);
+    const renderRate = settings.enabled && settings.lofi ? lofiSampleRate : audioBuffer.sampleRate;
+    const sourceBuffer = copySegmentBuffer(startSeconds, durationSeconds, renderRate, reverse);
     if (!sourceBuffer) return null;
+    if (!settings.enabled) return sourceBuffer;
     const context = new OfflineAudioContext(sourceBuffer.numberOfChannels, sourceBuffer.length, renderRate);
     const sourceNode = context.createBufferSource();
     sourceNode.buffer = sourceBuffer;
@@ -1154,9 +1192,10 @@ function SampleModal({
     stopPlayback();
     const startSeconds = start ?? trimStart * audioBuffer.duration;
     const durationSeconds = duration ?? (trimEnd - trimStart) * audioBuffer.duration;
+    const reverse = sliceIndex != null && Boolean(reversedSlices[sliceIndex]);
     const context = new AudioContext();
     const sourceNode = context.createBufferSource();
-    const previewBuffer = await renderPreviewBuffer(startSeconds, durationSeconds);
+    const previewBuffer = await renderPreviewBuffer(startSeconds, durationSeconds, reverse);
     sourceNode.buffer = previewBuffer || audioBuffer;
     sourceNode.connect(context.destination);
     sourceNode.addEventListener("ended", () => {
@@ -1167,7 +1206,7 @@ function SampleModal({
       setIsPlaying(false);
     });
     sourceNode.start(0, previewBuffer ? 0 : startSeconds, previewBuffer ? undefined : durationSeconds);
-    playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: startSeconds, duration: durationSeconds };
+    playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: startSeconds, duration: durationSeconds, reverse };
     setActiveSlice(sliceIndex ?? null);
     setIsPlaying(true);
   }
@@ -1177,7 +1216,20 @@ function SampleModal({
     if (!audioBuffer || !slice) return;
     setSelectedMarker(index > 0 ? index - 1 : null);
     play(slice.start * audioBuffer.duration, slice.duration, index);
-    setStatus(`Playing slice ${String(index + 1).padStart(2, "0")}`);
+    setStatus(`Playing slice ${String(index + 1).padStart(2, "0")}${slice.reversed ? " reversed" : ""}`);
+  }
+
+  function toggleReverseSlice(index = focusedSliceIndex) {
+    if (!audioBuffer || index == null || index < 0 || index >= slices.length) {
+      setStatus("Select or play a chop before reversing");
+      return;
+    }
+    setReversedSlices((current) => {
+      const next = { ...current, [index]: !current[index] };
+      if (!next[index]) delete next[index];
+      setStatus(`Slice ${String(index + 1).padStart(2, "0")} ${next[index] ? "reversed" : "normal"}`);
+      return next;
+    });
   }
 
   function playbackPosition() {
@@ -1263,6 +1315,11 @@ function SampleModal({
         removeMarker(selectedMarker);
         return;
       }
+      if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        toggleReverseSlice();
+        return;
+      }
       if (event.code === "Space") {
         event.preventDefault();
         if (playbackRef.current) stopPlayback();
@@ -1271,7 +1328,7 @@ function SampleModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [audioBuffer, markers, open, selectedMarker, slices, startChopSet, stopPlayback, trimEnd, trimStart, viewEnd, viewStart]);
+  }, [audioBuffer, focusedSliceIndex, markers, open, selectedMarker, slices, startChopSet, stopPlayback, trimEnd, trimStart, viewEnd, viewStart]);
 
   function encodeWav(channels: Float32Array[], sampleRate: number) {
     const channelCount = channels.length;
@@ -1304,11 +1361,13 @@ function SampleModal({
     return new Blob([buffer], { type: "audio/wav" });
   }
 
-  function renderSlice(startFrame: number, endFrame: number, name: string) {
+  function renderSlice(startFrame: number, endFrame: number, name: string, reverse = false) {
     if (!audioBuffer) return null;
-    const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, channel) =>
-      audioBuffer.getChannelData(channel).slice(startFrame, endFrame),
-    );
+    const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, channel) => {
+      const data = audioBuffer.getChannelData(channel).slice(startFrame, endFrame);
+      if (reverse) data.reverse();
+      return data;
+    });
     return new File([encodeWav(channels, audioBuffer.sampleRate)], name, { type: "audio/wav" });
   }
 
@@ -1328,7 +1387,7 @@ function SampleModal({
       const end = Math.floor(slice.end * audioBuffer.length);
       if (end - start < audioBuffer.sampleRate * 0.015) return [];
       const fallback = `sample_chop_${String(index + 1).padStart(2, "0")}`;
-      const file = renderSlice(start, end, `${cleanSliceName(slice.name, fallback)}.wav`);
+      const file = renderSlice(start, end, `${cleanSliceName(slice.name, fallback)}.wav`, slice.reversed);
       return file ? [file] : [];
     }).slice(0, maxChops);
   }
@@ -1467,7 +1526,7 @@ function SampleModal({
                     disabled={!audioBuffer || index >= maxChops || (index > 0 && !isPlaying && !(startChopSet && slice))}
                   >
                     <span className="text-sm font-semibold">{key.label}</span>
-                    <span className="truncate text-muted-foreground">{index >= maxChops ? "No pad" : index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
+                    <span className="truncate text-muted-foreground">{index >= maxChops ? "No pad" : index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}${slice.reversed ? " · R" : ""}` : "Empty"}</span>
                     <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${targetPadNumber + index}` : "Limit"}</span>
                   </button>
                 );
@@ -1509,7 +1568,7 @@ function SampleModal({
                 </div>
               </div>
               <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
-              <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); setStartChopSet(false); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
+              <Button variant="outline" className="justify-start" onClick={() => { setMarkers([]); setSelectedMarker(null); setStartChopSet(false); setReversedSlices({}); }}><RotateCcw className="h-4 w-4" /> Clear markers</Button>
             </div>
 
             <div className="grid gap-2 rounded-lg border bg-muted/25 p-3">
@@ -1537,6 +1596,22 @@ function SampleModal({
                     {profile.label}
                   </Button>
                 ))}
+              </div>
+              <div className="grid gap-2 rounded-md border bg-background p-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium text-foreground">Selected chop</span>
+                  <span className="text-muted-foreground">{focusedSliceIndex == null ? "none" : `Slice ${String(focusedSliceIndex + 1).padStart(2, "0")}`}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant={focusedSliceIndex != null && reversedSlices[focusedSliceIndex] ? "default" : "outline"}
+                  className="justify-start"
+                  onClick={() => toggleReverseSlice()}
+                  disabled={focusedSliceIndex == null}
+                >
+                  Reverse selected
+                  <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">R</span>
+                </Button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="grid gap-1 text-xs text-muted-foreground">
@@ -1584,7 +1659,10 @@ function SampleModal({
                     disabled={!audioBuffer}
                   >
                     <span>{samplerSliceKeys[slice.index]?.label || slice.index + 1} · Slice {String(slice.index + 1).padStart(2, "0")}</span>
-                    <span className="text-muted-foreground">{slice.duration.toFixed(2)}s</span>
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      {slice.reversed && <span className="rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-950">R</span>}
+                      {slice.duration.toFixed(2)}s
+                    </span>
                   </button>
                   <input
                     className="h-7 rounded border bg-muted/20 px-2 text-xs text-foreground"

@@ -175,6 +175,7 @@ Implemented:
 - Rendered chops can be named per slice before assignment.
 - Sampler modal includes compact transfer DSP controls for normalize, trim, mono, low cut, high cut, lo-fi rate/bit depth, gain, and target dB.
 - Sampler playback previews enabled low/high cut, mono, gain, and lo-fi processing before assignment.
+- Reverse individual chops from the Processing panel or the `R` key; reversed chops are marked in the waveform and exported reversed.
 - Lo-Fi processing has Soft, Grit, and Wreck profiles with progressively lower sample rate and bit depth.
 - Render chops as WAV files.
 - Assign rendered chops to pads starting from the selected pad.
