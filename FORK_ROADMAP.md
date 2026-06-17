@@ -155,6 +155,7 @@ Implemented:
 - Capture shared system/tab audio when Chromium and OS permissions allow it.
 - Capture microphone audio.
 - Arm recording and start capture only after input audio crosses the signal gate.
+- Record sampler captures as in-memory PCM through Web Audio instead of browser-encoded `MediaRecorder` blobs.
 - Load a local audio file.
 - Clear the loaded/recorded sample from the sampler workspace.
 - Draw a waveform for the loaded/recorded audio.

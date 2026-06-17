@@ -383,11 +383,12 @@ function SampleModal({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number; duration?: number } | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingContextRef = useRef<AudioContext | null>(null);
   const recordingFrameRef = useRef<number | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const recordingNodesRef = useRef<{ processor: ScriptProcessorNode; silentGain: GainNode } | null>(null);
+  const recordingChunksRef = useRef<Float32Array[][]>([]);
+  const recordingStartedRef = useRef(false);
   const [source, setSource] = useState<"system" | "mic">("system");
   const [mode, setMode] = useState<"edit" | "manual" | "perform">("manual");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -419,6 +420,9 @@ function SampleModal({
       window.cancelAnimationFrame(recordingFrameRef.current);
       recordingFrameRef.current = null;
     }
+    recordingNodesRef.current?.processor.disconnect();
+    recordingNodesRef.current?.silentGain.disconnect();
+    recordingNodesRef.current = null;
     void recordingContextRef.current?.close();
     recordingContextRef.current = null;
   }, []);
@@ -427,7 +431,8 @@ function SampleModal({
     stopRecordingMonitor();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    recorderRef.current = null;
+    recordingChunksRef.current = [];
+    recordingStartedRef.current = false;
     setRecordingState("idle");
   }, [stopRecordingMonitor]);
 
@@ -646,14 +651,37 @@ function SampleModal({
     const context = new AudioContext();
     try {
       const decoded = await context.decodeAudioData(await blob.arrayBuffer());
-      setAudioBuffer(decoded);
-      setMarkers([]);
-      setSelectedMarker(null);
-      setStartChopSet(false);
-      setStatus(`Loaded ${name} (${decoded.duration.toFixed(2)}s)`);
+      loadAudioBuffer(decoded, name);
     } finally {
       await context.close();
     }
+  }
+
+  function loadAudioBuffer(buffer: AudioBuffer, name = "audio") {
+    setAudioBuffer(buffer);
+    setMarkers([]);
+    setSelectedMarker(null);
+    setStartChopSet(false);
+    setStatus(`Loaded ${name} (${buffer.duration.toFixed(2)}s)`);
+  }
+
+  function createRecordedBuffer(context: AudioContext) {
+    const chunks = recordingChunksRef.current;
+    if (!chunks.length) return null;
+    const channelCount = chunks[0].length;
+    const frameCount = chunks.reduce((sum, chunk) => sum + (chunk[0]?.length || 0), 0);
+    if (!channelCount || !frameCount) return null;
+    const buffer = context.createBuffer(channelCount, frameCount, context.sampleRate);
+    for (let channel = 0; channel < channelCount; channel++) {
+      const output = buffer.getChannelData(channel);
+      let offset = 0;
+      for (const chunk of chunks) {
+        const input = chunk[channel] || chunk[0];
+        output.set(input, offset);
+        offset += input.length;
+      }
+    }
+    return buffer;
   }
 
   function clearSample() {
@@ -666,22 +694,30 @@ function SampleModal({
     setPlayhead(null);
     setStartChopSet(false);
     setRecordingPeaks([]);
-    chunksRef.current = [];
+    recordingChunksRef.current = [];
+    recordingStartedRef.current = false;
     setStatus("Sample cleared");
   }
 
   async function startRecording() {
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
+    if (!navigator.mediaDevices) {
       setStatus("Recording is not supported");
       return;
     }
     stopPlayback();
     clearRecorder();
-    chunksRef.current = [];
+    recordingChunksRef.current = [];
+    recordingStartedRef.current = false;
     setRecordingPeaks([]);
     try {
       const stream = source === "mic"
-        ? await navigator.mediaDevices.getUserMedia({ audio: true })
+        ? await navigator.mediaDevices.getUserMedia({
+          audio: {
+            autoGainControl: false,
+            echoCancellation: false,
+            noiseSuppression: false,
+          },
+        })
         : await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
       const audioTracks = stream.getAudioTracks();
       if (!audioTracks.length) {
@@ -691,41 +727,32 @@ function SampleModal({
       }
       streamRef.current = stream;
       const audioOnlyStream = new MediaStream(audioTracks);
-      const recorderOptions = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
-      const recorder = new MediaRecorder(audioOnlyStream, {
-        ...(recorderOptions ? { mimeType: recorderOptions } : {}),
-        audioBitsPerSecond: 320000,
-      });
-      recorderRef.current = recorder;
-      recorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      });
-      recorder.addEventListener("stop", async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        stopRecordingMonitor();
-        streamRef.current = null;
-        recorderRef.current = null;
-        setRecordingState("idle");
-        if (!chunksRef.current.length) {
-          setStatus("Nothing recorded");
-          return;
-        }
-        await loadBlob(new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }), "recording");
-      });
-
       const context = new AudioContext();
+      const sourceNode = context.createMediaStreamSource(audioOnlyStream);
       const analyser = context.createAnalyser();
+      const channelCount = Math.max(1, Math.min(2, audioTracks[0].getSettings().channelCount || 2));
+      const processor = context.createScriptProcessor(4096, channelCount, channelCount);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.35;
-      context.createMediaStreamSource(audioOnlyStream).connect(analyser);
+      sourceNode.connect(analyser);
+      sourceNode.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
       recordingContextRef.current = context;
+      recordingNodesRef.current = { processor, silentGain };
+      processor.onaudioprocess = (event) => {
+        if (!recordingStartedRef.current) return;
+        const channels = Array.from({ length: event.inputBuffer.numberOfChannels }, (_, channel) =>
+          new Float32Array(event.inputBuffer.getChannelData(channel)),
+        );
+        recordingChunksRef.current.push(channels);
+      };
       const data = new Float32Array(analyser.fftSize);
       let hotFrames = 0;
       setRecordingState("armed");
-      setStatus(source === "mic" ? "Armed: waiting for microphone audio" : "Armed: waiting for shared audio");
+      setStatus(source === "mic" ? "Armed: waiting for microphone audio" : "Armed: waiting for shared PCM audio");
 
       const monitor = () => {
         analyser.getFloatTimeDomainData(data);
@@ -737,10 +764,10 @@ function SampleModal({
         const rms = Math.sqrt(sum / data.length);
         setRecordingPeaks((current) => [...current.slice(-159), rms]);
         hotFrames = rms > 0.014 ? hotFrames + 1 : 0;
-        if (hotFrames >= 3 && recorder.state === "inactive") {
-          recorder.start();
+        if (hotFrames >= 3 && !recordingStartedRef.current) {
+          recordingStartedRef.current = true;
           setRecordingState("recording");
-          setStatus(source === "mic" ? "Recording microphone" : "Recording shared audio");
+          setStatus(source === "mic" ? "Recording microphone PCM" : "Recording shared PCM audio");
         }
         recordingFrameRef.current = window.requestAnimationFrame(monitor);
       };
@@ -753,12 +780,21 @@ function SampleModal({
   }
 
   function stopRecording() {
-    const recorder = recorderRef.current;
-    if (recorder?.state === "recording") {
-      recorder.stop();
+    const context = recordingContextRef.current;
+    const buffer = context && recordingStartedRef.current ? createRecordedBuffer(context) : null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopRecordingMonitor();
+    streamRef.current = null;
+    setRecordingState("idle");
+    if (buffer) {
+      recordingChunksRef.current = [];
+      recordingStartedRef.current = false;
+      setRecordingPeaks([]);
+      loadAudioBuffer(buffer, "recording");
       return;
     }
-    clearRecorder();
+    recordingChunksRef.current = [];
+    recordingStartedRef.current = false;
     setRecordingPeaks([]);
     setStatus("Recording cancelled");
   }
