@@ -281,11 +281,16 @@ function SampleSettingsPanel({
     const profile = lofiProfiles[mode];
     setSettings({
       ...settings,
+      enabled: true,
       lofi: true,
       lofiMode: mode,
       lofiSampleRate: String(profile.sampleRate),
       lofiBitDepth: String(profile.bitDepth),
     });
+  };
+  const toggleProcessSetting = (key: keyof Pick<SampleSettings, "normalize" | "trim" | "mono" | "lofi" | "lowCut" | "highCut">) => {
+    const enabled = !settings[key];
+    setSettings({ ...settings, enabled: enabled ? true : settings.enabled, [key]: enabled });
   };
 
   return (
@@ -295,15 +300,15 @@ function SampleSettingsPanel({
       </CardHeader>
       <CardContent className="grid gap-3">
         <SettingRow label="DSP on transfer" detail="Process audio before upload" checked={settings.enabled} onCheckedChange={(checked) => update("enabled", checked)} />
-        <SettingRow label="Normalize" detail={`Peak target ${settings.targetDb} dBFS`} checked={settings.normalize} onCheckedChange={(checked) => update("normalize", checked)} />
-        <SettingRow label="Trim silence" detail="Remove quiet heads and tails" checked={settings.trim} onCheckedChange={(checked) => update("trim", checked)} />
-        <SettingRow label="Mono mix" detail="Collapse stereo files for tight kits" checked={settings.mono} onCheckedChange={(checked) => update("mono", checked)} />
+        <SettingRow label="Normalize" detail={`Peak target ${settings.targetDb} dBFS`} checked={settings.normalize} onCheckedChange={() => toggleProcessSetting("normalize")} />
+        <SettingRow label="Trim silence" detail="Remove quiet heads and tails" checked={settings.trim} onCheckedChange={() => toggleProcessSetting("trim")} />
+        <SettingRow label="Mono mix" detail="Collapse stereo files for tight kits" checked={settings.mono} onCheckedChange={() => toggleProcessSetting("mono")} />
         <SettingRow label="Auto-tag names" detail="Prefix obvious kicks, snares, loops, and FX" checked={settings.autoTag} onCheckedChange={(checked) => update("autoTag", checked)} />
         <SettingRow label="Reverse copy" detail="Create a reversed variant next to source" checked={settings.reverse} onCheckedChange={(checked) => update("reverse", checked)} />
         <SettingRow label="Ping-pong copy" detail="Render forward and reverse playback" checked={settings.pingPong} onCheckedChange={(checked) => update("pingPong", checked)} />
-        <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={(checked) => update("lowCut", checked)} />
-        <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={(checked) => update("highCut", checked)} />
-        <SettingRow label="Lo-Fi mode" detail={`${settings.lofiSampleRate || 22050} Hz, ${settings.lofiBitDepth || 12}-bit character`} checked={settings.lofi} onCheckedChange={(checked) => update("lofi", checked)} />
+        <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={() => toggleProcessSetting("lowCut")} />
+        <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={() => toggleProcessSetting("highCut")} />
+        <SettingRow label="Lo-Fi mode" detail={`${settings.lofiSampleRate || 22050} Hz, ${settings.lofiBitDepth || 12}-bit character`} checked={settings.lofi} onCheckedChange={() => toggleProcessSetting("lofi")} />
         <div className="grid grid-cols-3 gap-2">
           {(Object.entries(lofiProfiles) as Array<[SampleSettings["lofiMode"], (typeof lofiProfiles)[SampleSettings["lofiMode"]]]>).map(([mode, profile]) => (
             <Button key={mode} type="button" variant={settings.lofiMode === mode ? "default" : "outline"} onClick={() => updateLofiMode(mode)}>
@@ -523,11 +528,16 @@ function SampleModal({
     const profile = lofiProfiles[mode];
     setSettings({
       ...settings,
+      enabled: true,
       lofi: true,
       lofiMode: mode,
       lofiSampleRate: String(profile.sampleRate),
       lofiBitDepth: String(profile.bitDepth),
     });
+  };
+  const toggleProcessSetting = (key: keyof Pick<SampleSettings, "normalize" | "trim" | "mono" | "lofi" | "lowCut" | "highCut">) => {
+    const enabled = !settings[key];
+    setSettings({ ...settings, enabled: enabled ? true : settings.enabled, [key]: enabled });
   };
 
   const detectTransientMarkers = useCallback((sensitivity: number) => {
@@ -635,30 +645,9 @@ function SampleModal({
           ? "rgba(53, 208, 139, 0.055)"
           : "rgba(255, 247, 239, 0.035)";
       ctx.fillRect(x, 0, width, rect.height);
-      ctx.fillStyle = "rgba(255, 247, 239, 0.72)";
-      ctx.font = "11px sans-serif";
-      ctx.fillText(String(index + 1).padStart(2, "0"), x + 8, rect.height - 12);
-      if (reversedSlices[index]) {
-        ctx.strokeStyle = "rgba(245, 200, 75, 0.34)";
-        ctx.lineWidth = 1;
-        for (let hatchX = x - rect.height; hatchX < x + width; hatchX += 14) {
-          ctx.beginPath();
-          ctx.moveTo(hatchX, rect.height);
-          ctx.lineTo(hatchX + rect.height, 0);
-          ctx.stroke();
-        }
-        ctx.fillStyle = "#f5c84b";
-        ctx.fillRect(x + 30, rect.height - 27, 18, 16);
-        ctx.fillStyle = "#071b16";
-        ctx.font = "10px sans-serif";
-        ctx.fillText("R", x + 36, rect.height - 15);
-      }
     });
 
     const data = audioBuffer.getChannelData(0);
-    const visibleStartFrame = Math.floor(viewStart * data.length);
-    const visibleFrameCount = Math.max(1, Math.floor((viewEnd - viewStart) * data.length));
-    const step = Math.max(1, Math.floor(visibleFrameCount / rect.width));
     const mid = rect.height / 2;
     const waveGradient = ctx.createLinearGradient(0, 0, 0, rect.height);
     waveGradient.addColorStop(0, "rgba(74, 255, 177, 0.92)");
@@ -668,21 +657,57 @@ function SampleModal({
     ctx.lineWidth = 1.4;
     ctx.shadowColor = "rgba(53, 208, 139, 0.42)";
     ctx.shadowBlur = 8;
-    ctx.beginPath();
-    for (let x = 0; x < rect.width; x++) {
-      let min = 1;
-      let max = -1;
-      const start = visibleStartFrame + x * step;
-      for (let i = 0; i < step && start + i < data.length; i++) {
-        const value = data[start + i];
-        if (value < min) min = value;
-        if (value > max) max = value;
+    slicePoints.slice(0, -1).forEach((sliceStart, index) => {
+      const sliceEnd = slicePoints[index + 1];
+      const visibleStart = Math.max(sliceStart, viewStart);
+      const visibleEnd = Math.min(sliceEnd, viewEnd);
+      if (visibleEnd <= visibleStart) return;
+      const startX = Math.max(0, Math.floor(timeToX(visibleStart)));
+      const endX = Math.min(rect.width, Math.ceil(timeToX(visibleEnd)));
+      const reversed = Boolean(reversedSlices[index]);
+      ctx.beginPath();
+      for (let x = startX; x <= endX; x++) {
+        const displayStart = viewStart + (x / Math.max(1, rect.width)) * (viewEnd - viewStart);
+        const displayEnd = viewStart + ((x + 1) / Math.max(1, rect.width)) * (viewEnd - viewStart);
+        const sampleStart = reversed ? sliceStart + sliceEnd - Math.min(sliceEnd, displayEnd) : Math.max(sliceStart, displayStart);
+        const sampleEnd = reversed ? sliceStart + sliceEnd - Math.max(sliceStart, displayStart) : Math.min(sliceEnd, displayEnd);
+        const frameStart = Math.max(0, Math.floor(Math.min(sampleStart, sampleEnd) * data.length));
+        const frameEnd = Math.min(data.length - 1, Math.ceil(Math.max(sampleStart, sampleEnd) * data.length));
+        let min = 1;
+        let max = -1;
+        for (let frame = frameStart; frame <= frameEnd; frame++) {
+          const value = data[frame] || 0;
+          if (value < min) min = value;
+          if (value > max) max = value;
+        }
+        if (min > max) {
+          min = 0;
+          max = 0;
+        }
+        ctx.moveTo(x, mid + min * mid * 0.88);
+        ctx.lineTo(x, mid + max * mid * 0.88);
       }
-      ctx.moveTo(x, mid + min * mid * 0.88);
-      ctx.lineTo(x, mid + max * mid * 0.88);
-    }
-    ctx.stroke();
+      ctx.stroke();
+    });
     ctx.shadowBlur = 0;
+
+    slicePoints.slice(0, -1).forEach((start, index) => {
+      const end = slicePoints[index + 1];
+      const visibleStart = Math.max(start, viewStart);
+      const visibleEnd = Math.min(end, viewEnd);
+      if (visibleEnd <= visibleStart) return;
+      const x = timeToX(visibleStart);
+      ctx.fillStyle = "rgba(255, 247, 239, 0.76)";
+      ctx.font = "11px sans-serif";
+      ctx.fillText(String(index + 1).padStart(2, "0"), x + 8, rect.height - 12);
+      if (reversedSlices[index]) {
+        ctx.fillStyle = "#f5c84b";
+        ctx.fillRect(x + 30, rect.height - 27, 18, 16);
+        ctx.fillStyle = "#071b16";
+        ctx.font = "10px sans-serif";
+        ctx.fillText("R", x + 36, rect.height - 15);
+      }
+    });
 
     markers.forEach((marker, index) => {
       if (marker < viewStart || marker > viewEnd) return;
@@ -1194,14 +1219,16 @@ function SampleModal({
     if (settings.lowCut) {
       const filter = context.createBiquadFilter();
       filter.type = "highpass";
-      filter.frequency.value = Number(settings.lowCutHz) || 35;
+      filter.frequency.setValueAtTime(Math.max(10, Math.min(renderRate / 2 - 100, Number(settings.lowCutHz) || 35)), context.currentTime);
+      filter.Q.setValueAtTime(0.707, context.currentTime);
       node.connect(filter);
       node = filter;
     }
     if (settings.highCut) {
       const filter = context.createBiquadFilter();
       filter.type = "lowpass";
-      filter.frequency.value = Number(settings.highCutHz) || 16000;
+      filter.frequency.setValueAtTime(Math.max(100, Math.min(renderRate / 2 - 100, Number(settings.highCutHz) || 16000)), context.currentTime);
+      filter.Q.setValueAtTime(0.707, context.currentTime);
       node.connect(filter);
       node = filter;
     }
@@ -1618,7 +1645,7 @@ function SampleModal({
                       "rounded-md border bg-background px-2 py-2 text-left text-xs",
                       settings[key] && "border-primary bg-primary/10",
                     )}
-                    onClick={() => updateSetting(key, !settings[key])}
+                    onClick={() => toggleProcessSetting(key)}
                   >
                     {label}
                   </button>
