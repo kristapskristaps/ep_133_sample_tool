@@ -457,6 +457,7 @@ function SampleModal({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playbackRef = useRef<{ context: AudioContext; source: AudioBufferSourceNode; startedAt: number; offset: number; duration?: number; reverse?: boolean } | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const streamSourceRef = useRef<"system" | "mic" | null>(null);
   const recordingContextRef = useRef<AudioContext | null>(null);
   const recordingFrameRef = useRef<number | null>(null);
   const recordingNodesRef = useRef<{ processor: ScriptProcessorNode; silentGain: GainNode } | null>(null);
@@ -483,6 +484,7 @@ function SampleModal({
   const [status, setStatus] = useState("Load or record audio");
   const [recordingState, setRecordingState] = useState<"idle" | "armed" | "recording">("idle");
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
+  const [systemShareActive, setSystemShareActive] = useState(false);
 
   const stopPlayback = useCallback(() => {
     if (!playbackRef.current) return;
@@ -508,10 +510,15 @@ function SampleModal({
     recordingContextRef.current = null;
   }, []);
 
-  const clearRecorder = useCallback(() => {
-    stopRecordingMonitor();
+  const releaseMediaStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    streamSourceRef.current = null;
+    setSystemShareActive(false);
+  }, []);
+
+  const clearRecorder = useCallback(() => {
+    stopRecordingMonitor();
     recordingChunksRef.current = [];
     recordingStartedRef.current = false;
     setRecordingState("idle");
@@ -825,7 +832,15 @@ function SampleModal({
   useEffect(() => () => {
     stopPlayback();
     clearRecorder();
-  }, [clearRecorder, stopPlayback]);
+    releaseMediaStream();
+  }, [clearRecorder, releaseMediaStream, stopPlayback]);
+
+  useEffect(() => {
+    if (open) return;
+    stopPlayback();
+    clearRecorder();
+    releaseMediaStream();
+  }, [clearRecorder, open, releaseMediaStream, stopPlayback]);
 
   useEffect(() => {
     if (!open || !audioBuffer || !isPlaying) return;
@@ -922,15 +937,22 @@ function SampleModal({
     recordingStartedRef.current = false;
     setRecordingPeaks([]);
     try {
-      const stream = source === "mic"
-        ? await navigator.mediaDevices.getUserMedia({
+      const existingStream = streamRef.current;
+      const canReuseStream = source === "system"
+        && streamSourceRef.current === "system"
+        && existingStream?.getAudioTracks().some((track) => track.readyState === "live");
+      if (!canReuseStream) releaseMediaStream();
+      const stream = canReuseStream && existingStream
+        ? existingStream
+        : source === "mic"
+          ? await navigator.mediaDevices.getUserMedia({
           audio: {
             autoGainControl: false,
             echoCancellation: false,
             noiseSuppression: false,
           },
         })
-        : await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+          : await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
       const audioTracks = stream.getAudioTracks();
       if (!audioTracks.length) {
         stream.getTracks().forEach((track) => track.stop());
@@ -938,6 +960,21 @@ function SampleModal({
         return;
       }
       streamRef.current = stream;
+      streamSourceRef.current = source;
+      setSystemShareActive(source === "system");
+      if (!canReuseStream) {
+        stream.getTracks().forEach((track) => {
+          track.addEventListener("ended", () => {
+            if (streamRef.current !== stream) return;
+            stopRecordingMonitor();
+            streamRef.current = null;
+            streamSourceRef.current = null;
+            setSystemShareActive(false);
+            setRecordingState("idle");
+            setStatus(source === "system" ? "System audio share ended" : "Microphone capture ended");
+          }, { once: true });
+        });
+      }
       const audioOnlyStream = new MediaStream(audioTracks);
       const context = new AudioContext();
       const sourceNode = context.createMediaStreamSource(audioOnlyStream);
@@ -964,7 +1001,9 @@ function SampleModal({
       const data = new Float32Array(analyser.fftSize);
       let hotFrames = 0;
       setRecordingState("armed");
-      setStatus(source === "mic" ? "Armed: waiting for microphone audio" : "Armed: waiting for shared PCM audio");
+      setStatus(source === "mic"
+        ? "Armed: waiting for microphone audio"
+        : canReuseStream ? "Armed: reusing shared PCM audio" : "Armed: waiting for shared PCM audio");
 
       const monitor = () => {
         analyser.getFloatTimeDomainData(data);
@@ -994,9 +1033,8 @@ function SampleModal({
   function stopRecording() {
     const context = recordingContextRef.current;
     const buffer = context && recordingStartedRef.current ? createRecordedBuffer(context) : null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
     stopRecordingMonitor();
-    streamRef.current = null;
+    if (streamSourceRef.current !== "system") releaseMediaStream();
     setRecordingState("idle");
     if (buffer) {
       recordingChunksRef.current = [];
@@ -1501,6 +1539,18 @@ function SampleModal({
               <Button variant={source === "system" ? "default" : "outline"} onClick={() => setSource("system")}>System</Button>
               <Button variant={source === "mic" ? "default" : "outline"} onClick={() => setSource("mic")}>Mic</Button>
               <Button onClick={recordingState === "idle" ? startRecording : stopRecording}><Mic2 className="h-4 w-4" /> {recordingState === "recording" ? "Stop" : recordingState === "armed" ? "Cancel" : "Record"}</Button>
+              {systemShareActive && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (recordingState !== "idle") stopRecording();
+                    releaseMediaStream();
+                    setStatus("System audio share released");
+                  }}
+                >
+                  Release share
+                </Button>
+              )}
               <Button variant="outline" onClick={() => fileInput.current?.click()}><FolderInput className="h-4 w-4" /> Load file</Button>
               <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
               <Button variant="outline" onClick={() => isPlaying ? stopPlayback() : play()}>{isPlaying ? "Stop" : "Play"}</Button>

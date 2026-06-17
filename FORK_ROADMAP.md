@@ -153,6 +153,7 @@ Sampler mode opens as a modal from the selected pad.
 Implemented:
 
 - Capture shared system/tab audio when Chromium and OS permissions allow it.
+- Reuse an active shared system/tab audio stream for repeated takes while the sampler stays open, with an explicit release control.
 - Capture microphone audio.
 - Arm recording and start capture only after input audio crosses the signal gate.
 - Record sampler captures as in-memory PCM through Web Audio instead of browser-encoded `MediaRecorder` blobs.
