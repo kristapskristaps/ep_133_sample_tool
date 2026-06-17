@@ -978,51 +978,48 @@ function SampleModal({
       const audioOnlyStream = new MediaStream(audioTracks);
       const context = new AudioContext();
       const sourceNode = context.createMediaStreamSource(audioOnlyStream);
-      const analyser = context.createAnalyser();
       const channelCount = Math.max(1, Math.min(2, audioTracks[0].getSettings().channelCount || 2));
       const processor = context.createScriptProcessor(4096, channelCount, channelCount);
       const silentGain = context.createGain();
       silentGain.gain.value = 0;
-      analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.35;
-      sourceNode.connect(analyser);
       sourceNode.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(context.destination);
       recordingContextRef.current = context;
       recordingNodesRef.current = { processor, silentGain };
-      processor.onaudioprocess = (event) => {
-        if (!recordingStartedRef.current) return;
-        const channels = Array.from({ length: event.inputBuffer.numberOfChannels }, (_, channel) =>
-          new Float32Array(event.inputBuffer.getChannelData(channel)),
-        );
-        recordingChunksRef.current.push(channels);
-      };
-      const data = new Float32Array(analyser.fftSize);
       let hotFrames = 0;
       setRecordingState("armed");
       setStatus(source === "mic"
         ? "Armed: waiting for microphone audio"
         : canReuseStream ? "Armed: reusing shared PCM audio" : "Armed: waiting for shared PCM audio");
 
-      const monitor = () => {
-        analyser.getFloatTimeDomainData(data);
+      processor.onaudioprocess = (event) => {
+        const channels = Array.from({ length: event.inputBuffer.numberOfChannels }, (_, channel) =>
+          new Float32Array(event.inputBuffer.getChannelData(channel)),
+        );
         let sum = 0;
-        for (let index = 0; index < data.length; index++) {
-          const centered = data[index];
-          sum += centered * centered;
+        let samples = 0;
+        for (const channel of channels) {
+          for (let index = 0; index < channel.length; index++) {
+            const centered = channel[index];
+            sum += centered * centered;
+            samples++;
+          }
         }
-        const rms = Math.sqrt(sum / data.length);
+        const rms = Math.sqrt(sum / Math.max(1, samples));
         setRecordingPeaks((current) => [...current.slice(-159), rms]);
-        hotFrames = rms > 0.014 ? hotFrames + 1 : 0;
-        if (hotFrames >= 3 && !recordingStartedRef.current) {
+        if (!recordingStartedRef.current) {
+          hotFrames = rms > 0.014 ? hotFrames + 1 : 0;
+          if (hotFrames < 3) return;
           recordingStartedRef.current = true;
-          setRecordingState("recording");
-          setStatus(source === "mic" ? "Recording microphone PCM" : "Recording shared PCM audio");
+          window.setTimeout(() => {
+            setRecordingState("recording");
+            setStatus(source === "mic" ? "Recording microphone PCM" : "Recording shared PCM audio");
+          }, 0);
         }
-        recordingFrameRef.current = window.requestAnimationFrame(monitor);
+        recordingChunksRef.current.push(channels);
       };
-      recordingFrameRef.current = window.requestAnimationFrame(monitor);
+      await context.resume();
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "Recording failed");
