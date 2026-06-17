@@ -2,6 +2,12 @@ const DEVICE_SAMPLE_RATE = 46875;
 const DEVICE_AUDIO_FORMAT = "s16";
 const MAX_SAMPLE_SECONDS = 20;
 
+const lofiProfiles = {
+  soft: { sampleRate: 22050, bitDepth: 12 },
+  grit: { sampleRate: 12000, bitDepth: 8 },
+  wreck: { sampleRate: 6000, bitDepth: 6 },
+} as const;
+
 type NativeAudioOptions = {
   sampleRate: number;
   bitDepth: number;
@@ -15,9 +21,11 @@ function loadNativeAudioOptions(): NativeAudioOptions {
   try {
     const settings = JSON.parse(localStorage.getItem("ep133.offlineDsp") || "{}") as Record<string, unknown>;
     const lofi = Boolean(settings.lofi);
+    const lofiMode = settings.lofiMode === "grit" || settings.lofiMode === "wreck" || settings.lofiMode === "soft" ? settings.lofiMode : "soft";
+    const profile = lofiProfiles[lofiMode];
     return {
-      sampleRate: lofi ? clamp(Number(settings.lofiSampleRate) || 22050, 3000, DEVICE_SAMPLE_RATE) : DEVICE_SAMPLE_RATE,
-      bitDepth: lofi ? clamp(Number(settings.lofiBitDepth) || 12, 4, 16) : 16,
+      sampleRate: lofi ? clamp(Number(settings.lofiSampleRate) || profile.sampleRate, 3000, DEVICE_SAMPLE_RATE) : DEVICE_SAMPLE_RATE,
+      bitDepth: lofi ? clamp(Number(settings.lofiBitDepth) || profile.bitDepth, 4, 16) : 16,
     };
   } catch {
     return { sampleRate: DEVICE_SAMPLE_RATE, bitDepth: 16 };

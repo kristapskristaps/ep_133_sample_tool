@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { DeviceEngineHost, groups, projects, useDeviceEngine, type DeviceEngine, type Pad, type PadUploadSlotTarget, type Sound } from "@/device";
-import { defaultSettings, loadInitialSampleSettings, syncOfflineDspSettings, type SampleSettings } from "@/dsp/settings";
+import { defaultSettings, loadInitialSampleSettings, lofiProfiles, syncOfflineDspSettings, type SampleSettings } from "@/dsp/settings";
 import { cn } from "@/lib/utils";
 
 function useTheme() {
@@ -244,6 +244,16 @@ function SampleSettingsPanel({
   const update = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
     setSettings({ ...settings, [key]: value });
   };
+  const updateLofiMode = (mode: SampleSettings["lofiMode"]) => {
+    const profile = lofiProfiles[mode];
+    setSettings({
+      ...settings,
+      lofi: true,
+      lofiMode: mode,
+      lofiSampleRate: String(profile.sampleRate),
+      lofiBitDepth: String(profile.bitDepth),
+    });
+  };
 
   return (
     <Card>
@@ -261,6 +271,13 @@ function SampleSettingsPanel({
         <SettingRow label="Low cut" detail={`${settings.lowCutHz || 35} Hz high-pass`} checked={settings.lowCut} onCheckedChange={(checked) => update("lowCut", checked)} />
         <SettingRow label="High cut" detail={`${settings.highCutHz || 16000} Hz low-pass`} checked={settings.highCut} onCheckedChange={(checked) => update("highCut", checked)} />
         <SettingRow label="Lo-Fi mode" detail={`${settings.lofiSampleRate || 22050} Hz, ${settings.lofiBitDepth || 12}-bit character`} checked={settings.lofi} onCheckedChange={(checked) => update("lofi", checked)} />
+        <div className="grid grid-cols-3 gap-2">
+          {(Object.entries(lofiProfiles) as Array<[SampleSettings["lofiMode"], (typeof lofiProfiles)[SampleSettings["lofiMode"]]]>).map(([mode, profile]) => (
+            <Button key={mode} type="button" variant={settings.lofiMode === mode ? "default" : "outline"} onClick={() => updateLofiMode(mode)}>
+              {profile.label}
+            </Button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <label className="grid gap-1 text-xs text-muted-foreground">
             Output Hz
@@ -415,7 +432,7 @@ function SampleModal({
     try {
       playbackRef.current.source.stop();
     } catch {}
-    void playbackRef.current.context.close();
+    if (playbackRef.current.context.state !== "closed") void playbackRef.current.context.close();
     playbackRef.current = null;
     setPlayhead(null);
     setActiveSlice(null);
@@ -464,6 +481,16 @@ function SampleModal({
 
   const updateSetting = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
     setSettings({ ...settings, [key]: value });
+  };
+  const updateLofiMode = (mode: SampleSettings["lofiMode"]) => {
+    const profile = lofiProfiles[mode];
+    setSettings({
+      ...settings,
+      lofi: true,
+      lofiMode: mode,
+      lofiSampleRate: String(profile.sampleRate),
+      lofiBitDepth: String(profile.bitDepth),
+    });
   };
 
   const detectTransientMarkers = useCallback((sensitivity: number) => {
@@ -1050,23 +1077,96 @@ function SampleModal({
     setStatus(`${autoChopMarkers.length + 1} autochops at threshold ${autoChopSensitivity}`);
   }
 
-  function play(start?: number, duration?: number, sliceIndex?: number) {
+  function bitCrushValue(sample: number, bitDepth: number) {
+    if (bitDepth >= 16) return sample;
+    const steps = 2 ** Math.max(1, bitDepth);
+    return Math.round(((sample + 1) / 2) * (steps - 1)) / (steps - 1) * 2 - 1;
+  }
+
+  function copySegmentBuffer(startSeconds: number, durationSeconds: number, sampleRate: number) {
+    if (!audioBuffer) return null;
+    const channelCount = settings.mono ? 1 : Math.min(2, audioBuffer.numberOfChannels);
+    const length = Math.max(1, Math.floor(durationSeconds * sampleRate));
+    const buffer = new AudioBuffer({ length, numberOfChannels: channelCount, sampleRate });
+    const sourceStart = Math.max(0, Math.floor(startSeconds * audioBuffer.sampleRate));
+    for (let channel = 0; channel < channelCount; channel++) {
+      const output = buffer.getChannelData(channel);
+      const sourceChannel = audioBuffer.getChannelData(Math.min(channel, audioBuffer.numberOfChannels - 1));
+      if (settings.mono && audioBuffer.numberOfChannels > 1) {
+        const otherChannel = audioBuffer.getChannelData(1);
+        for (let frame = 0; frame < length; frame++) {
+          const sourceFrame = sourceStart + Math.floor((frame / sampleRate) * audioBuffer.sampleRate);
+          output[frame] = ((sourceChannel[sourceFrame] || 0) + (otherChannel[sourceFrame] || 0)) / 2;
+        }
+      } else {
+        for (let frame = 0; frame < length; frame++) {
+          const sourceFrame = sourceStart + Math.floor((frame / sampleRate) * audioBuffer.sampleRate);
+          output[frame] = sourceChannel[sourceFrame] || 0;
+        }
+      }
+    }
+    return buffer;
+  }
+
+  async function renderPreviewBuffer(startSeconds: number, durationSeconds: number) {
+    if (!audioBuffer || !settings.enabled) return null;
+    const lofiProfile = lofiProfiles[settings.lofiMode] || lofiProfiles.soft;
+    const lofiSampleRate = Math.max(3000, Math.min(audioBuffer.sampleRate, Number(settings.lofiSampleRate) || lofiProfile.sampleRate));
+    const renderRate = settings.lofi ? lofiSampleRate : audioBuffer.sampleRate;
+    const sourceBuffer = copySegmentBuffer(startSeconds, durationSeconds, renderRate);
+    if (!sourceBuffer) return null;
+    const context = new OfflineAudioContext(sourceBuffer.numberOfChannels, sourceBuffer.length, renderRate);
+    const sourceNode = context.createBufferSource();
+    sourceNode.buffer = sourceBuffer;
+    let node: AudioNode = sourceNode;
+    if (settings.lowCut) {
+      const filter = context.createBiquadFilter();
+      filter.type = "highpass";
+      filter.frequency.value = Number(settings.lowCutHz) || 35;
+      node.connect(filter);
+      node = filter;
+    }
+    if (settings.highCut) {
+      const filter = context.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = Number(settings.highCutHz) || 16000;
+      node.connect(filter);
+      node = filter;
+    }
+    const gain = context.createGain();
+    gain.gain.value = 10 ** ((Number(settings.gainDb) || 0) / 20);
+    node.connect(gain);
+    gain.connect(context.destination);
+    sourceNode.start();
+    const rendered = await context.startRendering();
+    if (settings.lofi) {
+      const bitDepth = Math.max(2, Math.min(16, Number(settings.lofiBitDepth) || lofiProfile.bitDepth));
+      for (let channel = 0; channel < rendered.numberOfChannels; channel++) {
+        const data = rendered.getChannelData(channel);
+        for (let frame = 0; frame < data.length; frame++) data[frame] = bitCrushValue(data[frame], bitDepth);
+      }
+    }
+    return rendered;
+  }
+
+  async function play(start?: number, duration?: number, sliceIndex?: number) {
     if (!audioBuffer) return;
     stopPlayback();
     const startSeconds = start ?? trimStart * audioBuffer.duration;
     const durationSeconds = duration ?? (trimEnd - trimStart) * audioBuffer.duration;
     const context = new AudioContext();
     const sourceNode = context.createBufferSource();
-    sourceNode.buffer = audioBuffer;
+    const previewBuffer = await renderPreviewBuffer(startSeconds, durationSeconds);
+    sourceNode.buffer = previewBuffer || audioBuffer;
     sourceNode.connect(context.destination);
     sourceNode.addEventListener("ended", () => {
-      void context.close();
+      if (context.state !== "closed") void context.close();
       playbackRef.current = null;
       setPlayhead(null);
       setActiveSlice(null);
       setIsPlaying(false);
     });
-    sourceNode.start(0, startSeconds, durationSeconds);
+    sourceNode.start(0, previewBuffer ? 0 : startSeconds, previewBuffer ? undefined : durationSeconds);
     playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: startSeconds, duration: durationSeconds };
     setActiveSlice(sliceIndex ?? null);
     setIsPlaying(true);
@@ -1431,9 +1531,16 @@ function SampleModal({
                   </button>
                 ))}
               </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.entries(lofiProfiles) as Array<[SampleSettings["lofiMode"], (typeof lofiProfiles)[SampleSettings["lofiMode"]]]>).map(([mode, profile]) => (
+                  <Button key={mode} type="button" variant={settings.lofiMode === mode ? "default" : "outline"} onClick={() => updateLofiMode(mode)}>
+                    {profile.label}
+                  </Button>
+                ))}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="grid gap-1 text-xs text-muted-foreground">
-                  Bit rate
+                  Lo-Fi Hz
                   <input className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={settings.lofiSampleRate} onChange={(event) => updateSetting("lofiSampleRate", event.target.value)} />
                 </label>
                 <label className="grid gap-1 text-xs text-muted-foreground">
@@ -1458,7 +1565,7 @@ function SampleModal({
                 </label>
               </div>
               <div className="text-xs text-muted-foreground">
-                These settings apply when assigning chops to pads.
+                These settings apply to sampler playback and pad assignment.
               </div>
             </div>
 

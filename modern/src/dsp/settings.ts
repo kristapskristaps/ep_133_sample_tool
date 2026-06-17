@@ -9,6 +9,7 @@ export type SampleSettings = {
   lowCut: boolean;
   highCut: boolean;
   lofi: boolean;
+  lofiMode: "soft" | "grit" | "wreck";
   lowCutHz: string;
   highCutHz: string;
   lofiSampleRate: string;
@@ -23,6 +24,12 @@ export type SampleSettings = {
   targetBpm: string;
 };
 
+export const lofiProfiles = {
+  soft: { label: "Soft", sampleRate: 22050, bitDepth: 12 },
+  grit: { label: "Grit", sampleRate: 12000, bitDepth: 8 },
+  wreck: { label: "Wreck", sampleRate: 6000, bitDepth: 6 },
+} as const;
+
 export const defaultSettings: SampleSettings = {
   enabled: true,
   normalize: true,
@@ -34,6 +41,7 @@ export const defaultSettings: SampleSettings = {
   lowCut: false,
   highCut: false,
   lofi: false,
+  lofiMode: "soft",
   lowCutHz: "35",
   highCutHz: "16000",
   lofiSampleRate: "22050",
@@ -49,6 +57,7 @@ export const defaultSettings: SampleSettings = {
 };
 
 export function syncOfflineDspSettings(settings: SampleSettings) {
+  const lofiProfile = lofiProfiles[settings.lofiMode] || lofiProfiles.soft;
   const payload = {
     enabled: settings.enabled,
     autoTag: settings.autoTag,
@@ -65,8 +74,9 @@ export function syncOfflineDspSettings(settings: SampleSettings) {
     lowCutHz: settings.lowCut ? Number(settings.lowCutHz) || 35 : "",
     highCutHz: settings.highCut ? Number(settings.highCutHz) || 16000 : "",
     lofi: settings.lofi,
-    lofiSampleRate: settings.lofi ? Number(settings.lofiSampleRate) || 22050 : "",
-    lofiBitDepth: settings.lofi ? Number(settings.lofiBitDepth) || 12 : "",
+    lofiMode: settings.lofiMode,
+    lofiSampleRate: settings.lofi ? Number(settings.lofiSampleRate) || lofiProfile.sampleRate : "",
+    lofiBitDepth: settings.lofi ? Number(settings.lofiBitDepth) || lofiProfile.bitDepth : "",
     targetSampleRate: Number(settings.targetSampleRate) || 46875,
     sourceBpm: settings.sourceBpm,
     targetBpm: settings.targetBpm,
@@ -93,6 +103,7 @@ export function loadInitialSampleSettings(): SampleSettings {
       lowCut: Number(stored.lowCutHz) > 0,
       highCut: Number(stored.highCutHz) > 0,
       lofi: typeof stored.lofi === "boolean" ? stored.lofi : defaultSettings.lofi,
+      lofiMode: stored.lofiMode === "grit" || stored.lofiMode === "wreck" || stored.lofiMode === "soft" ? stored.lofiMode : defaultSettings.lofiMode,
       lowCutHz: stored.lowCutHz ? String(stored.lowCutHz) : defaultSettings.lowCutHz,
       highCutHz: stored.highCutHz ? String(stored.highCutHz) : defaultSettings.highCutHz,
       lofiSampleRate: stored.lofiSampleRate != null ? String(stored.lofiSampleRate) : defaultSettings.lofiSampleRate,
