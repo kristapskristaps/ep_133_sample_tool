@@ -169,6 +169,8 @@ Implemented:
 - Keyboard slice playback uses `1 2 3 4 5 6 7 8 9 0 ß ´` for up to 12 slices.
 - Audition individual slices before assignment.
 - Sampler waveform shows slice regions, marker handles, selected markers, active slices, and playback position.
+- Sampler waveform supports zoom, pan, and trim in/out handles.
+- Rendered chops can be named per slice before assignment.
 - Sampler modal includes compact transfer DSP controls for normalize, trim, mono, low cut, high cut, lo-fi rate/bit depth, gain, and target dB.
 - Render chops as WAV files.
 - Assign rendered chops to pads starting from the selected pad.
@@ -176,7 +178,7 @@ Implemented:
 Limitations:
 
 - System audio capture depends on the OS and Chromium picker.
-- No zoom/trim handles yet.
+- No beat-grid chopping yet.
 
 ## Not Complete Yet
 
@@ -260,5 +262,5 @@ npm start
 1. Add deflated ZIP import support or switch to a vetted ZIP library.
 2. Add full Project backup, timeline browsing, and rollback.
 3. Add high-quality pitch-preserving time-stretch/pitch-shift.
-4. Add sampler zoom, trim handles, beat-grid chopping, and per-slice naming.
+4. Add beat-grid chopping and tighter sampler hardware regression notes.
 5. Add hardware regression checklist results to this file.

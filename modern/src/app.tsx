@@ -399,6 +399,12 @@ function SampleModal({
   const [isPlaying, setIsPlaying] = useState(false);
   const [startChopSet, setStartChopSet] = useState(false);
   const [autoChopSensitivity, setAutoChopSensitivity] = useState(55);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState(0);
+  const [draggingTrim, setDraggingTrim] = useState<"start" | "end" | null>(null);
+  const [sliceNames, setSliceNames] = useState<Record<number, string>>({});
   const [status, setStatus] = useState("Load or record audio");
   const [recordingState, setRecordingState] = useState<"idle" | "armed" | "recording">("idle");
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
@@ -436,12 +442,17 @@ function SampleModal({
     setRecordingState("idle");
   }, [stopRecordingMonitor]);
 
-  const slicePoints = [0, ...markers, 1].sort((a, b) => a - b);
+  const visibleDuration = 1 / zoom;
+  const viewStart = pan * Math.max(0, 1 - visibleDuration);
+  const viewEnd = Math.min(1, viewStart + visibleDuration);
+  const activeMarkers = markers.filter((marker) => marker > trimStart + 0.001 && marker < trimEnd - 0.001);
+  const slicePoints = [trimStart, ...activeMarkers, trimEnd].sort((a, b) => a - b);
   const slices = slicePoints.slice(0, -1).map((start, index) => ({
     index,
     start,
     end: slicePoints[index + 1],
     duration: audioBuffer ? (slicePoints[index + 1] - start) * audioBuffer.duration : 0,
+    name: sliceNames[index] || `sample_chop_${String(index + 1).padStart(2, "0")}`,
   }));
 
   const updateSetting = <Key extends keyof SampleSettings>(key: Key, value: SampleSettings[Key]) => {
@@ -473,8 +484,8 @@ function SampleModal({
       }
       cooldown--;
     }
-    return next.slice(0, 11);
-  }, [audioBuffer]);
+    return next.filter((marker) => marker > trimStart + 0.005 && marker < trimEnd - 0.005).slice(0, 11);
+  }, [audioBuffer, trimEnd, trimStart]);
 
   const autoChopMarkers = useMemo(() => detectTransientMarkers(autoChopSensitivity), [autoChopSensitivity, detectTransientMarkers]);
   const autoChopCount = audioBuffer ? Math.min(12, autoChopMarkers.length + 1) : 0;
@@ -528,10 +539,17 @@ function SampleModal({
       return;
     }
 
+    const timeToX = (position: number) => ((position - viewStart) / Math.max(0.001, viewEnd - viewStart)) * rect.width;
+    const visibleTrimStart = timeToX(trimStart);
+    const visibleTrimEnd = timeToX(trimEnd);
+
     slicePoints.slice(0, -1).forEach((start, index) => {
       const end = slicePoints[index + 1];
-      const x = start * rect.width;
-      const width = Math.max(1, (end - start) * rect.width);
+      const visibleStart = Math.max(start, viewStart);
+      const visibleEnd = Math.min(end, viewEnd);
+      if (visibleEnd <= visibleStart) return;
+      const x = timeToX(visibleStart);
+      const width = Math.max(1, timeToX(visibleEnd) - x);
       ctx.fillStyle = index === activeSlice
         ? "rgba(241, 90, 59, 0.22)"
         : index % 2
@@ -544,7 +562,9 @@ function SampleModal({
     });
 
     const data = audioBuffer.getChannelData(0);
-    const step = Math.max(1, Math.floor(data.length / rect.width));
+    const visibleStartFrame = Math.floor(viewStart * data.length);
+    const visibleFrameCount = Math.max(1, Math.floor((viewEnd - viewStart) * data.length));
+    const step = Math.max(1, Math.floor(visibleFrameCount / rect.width));
     const mid = rect.height / 2;
     const waveGradient = ctx.createLinearGradient(0, 0, 0, rect.height);
     waveGradient.addColorStop(0, "rgba(74, 255, 177, 0.92)");
@@ -558,7 +578,7 @@ function SampleModal({
     for (let x = 0; x < rect.width; x++) {
       let min = 1;
       let max = -1;
-      const start = x * step;
+      const start = visibleStartFrame + x * step;
       for (let i = 0; i < step && start + i < data.length; i++) {
         const value = data[start + i];
         if (value < min) min = value;
@@ -571,7 +591,8 @@ function SampleModal({
     ctx.shadowBlur = 0;
 
     markers.forEach((marker, index) => {
-      const x = marker * rect.width;
+      if (marker < viewStart || marker > viewEnd) return;
+      const x = timeToX(marker);
       const selected = selectedMarker === index;
       ctx.strokeStyle = selected ? "#fff7ef" : "#f15a3b";
       ctx.lineWidth = selected ? 3 : 2;
@@ -587,35 +608,59 @@ function SampleModal({
     });
 
     if (startChopSet) {
-      ctx.strokeStyle = "#35d08b";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, rect.height);
-      ctx.stroke();
-      ctx.fillStyle = "#35d08b";
-      ctx.fillRect(0, 7, 20, 18);
-      ctx.fillStyle = "#071b16";
-      ctx.font = "10px sans-serif";
-      ctx.fillText("1", 7, 20);
+      if (trimStart >= viewStart && trimStart <= viewEnd) {
+        const x = timeToX(trimStart);
+        ctx.strokeStyle = "#35d08b";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, rect.height);
+        ctx.stroke();
+        ctx.fillStyle = "#35d08b";
+        ctx.fillRect(x, 7, 20, 18);
+        ctx.fillStyle = "#071b16";
+        ctx.font = "10px sans-serif";
+        ctx.fillText("1", x + 7, 20);
+      }
     }
 
-    if (playhead != null) {
-      const x = playhead * rect.width;
-      ctx.fillStyle = "rgba(245, 200, 75, 0.08)";
-      ctx.fillRect(0, 0, x, rect.height);
-      ctx.strokeStyle = "#f5c84b";
-      ctx.lineWidth = 2.5;
+    [
+      { position: trimStart, label: "IN", color: "#5db8ff" },
+      { position: trimEnd, label: "OUT", color: "#f5c84b" },
+    ].forEach((handle) => {
+      if (handle.position < viewStart || handle.position > viewEnd) return;
+      const x = timeToX(handle.position);
+      ctx.strokeStyle = handle.color;
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, rect.height);
       ctx.stroke();
-      ctx.fillStyle = "#f5c84b";
-      ctx.beginPath();
-      ctx.arc(x, 14, 5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = handle.color;
+      ctx.fillRect(x - 14, rect.height - 28, 28, 18);
+      ctx.fillStyle = "#071b16";
+      ctx.font = "9px sans-serif";
+      ctx.fillText(handle.label, x - 9, rect.height - 15);
+    });
+
+    if (playhead != null) {
+      if (playhead >= viewStart && playhead <= viewEnd) {
+        const x = timeToX(playhead);
+        ctx.fillStyle = "rgba(245, 200, 75, 0.08)";
+        ctx.fillRect(0, 0, x, rect.height);
+        ctx.strokeStyle = "#f5c84b";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, rect.height);
+        ctx.stroke();
+        ctx.fillStyle = "#f5c84b";
+        ctx.beginPath();
+        ctx.arc(x, 14, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet]);
+  }, [activeSlice, audioBuffer, markers, playhead, recordingPeaks, recordingState, selectedMarker, slicePoints, startChopSet, trimEnd, trimStart, viewEnd, viewStart]);
 
   useEffect(() => {
     if (!open) return;
@@ -662,6 +707,11 @@ function SampleModal({
     setMarkers([]);
     setSelectedMarker(null);
     setStartChopSet(false);
+    setTrimStart(0);
+    setTrimEnd(1);
+    setZoom(1);
+    setPan(0);
+    setSliceNames({});
     setStatus(`Loaded ${name} (${buffer.duration.toFixed(2)}s)`);
   }
 
@@ -693,6 +743,11 @@ function SampleModal({
     setActiveSlice(null);
     setPlayhead(null);
     setStartChopSet(false);
+    setTrimStart(0);
+    setTrimEnd(1);
+    setZoom(1);
+    setPan(0);
+    setSliceNames({});
     setRecordingPeaks([]);
     recordingChunksRef.current = [];
     recordingStartedRef.current = false;
@@ -802,18 +857,30 @@ function SampleModal({
   function markerFromEvent(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!canvasRef.current) return 0;
     const rect = canvasRef.current.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const visiblePosition = (event.clientX - rect.left) / Math.max(1, rect.width);
+    return Math.max(0, Math.min(1, viewStart + visiblePosition * (viewEnd - viewStart)));
   }
 
   function nearestMarkerIndex(position: number) {
     const canvas = canvasRef.current;
     if (!canvas) return -1;
     const width = Math.max(1, canvas.getBoundingClientRect().width);
-    return markers.findIndex((marker) => Math.abs(marker - position) * width <= 12);
+    return markers.findIndex((marker) => Math.abs(marker - position) / Math.max(0.001, viewEnd - viewStart) * width <= 12);
+  }
+
+  function nearestTrimHandle(position: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const width = Math.max(1, canvas.getBoundingClientRect().width);
+    const startDistance = Math.abs(trimStart - position) / Math.max(0.001, viewEnd - viewStart) * width;
+    const endDistance = Math.abs(trimEnd - position) / Math.max(0.001, viewEnd - viewStart) * width;
+    if (startDistance <= 14 && startDistance <= endDistance) return "start";
+    if (endDistance <= 14) return "end";
+    return null;
   }
 
   function addMarker(position: number, label = "chops") {
-    if (!audioBuffer || position <= 0.01 || position >= 0.99 || markers.length >= 11) return;
+    if (!audioBuffer || position <= trimStart + 0.005 || position >= trimEnd - 0.005 || markers.length >= 11) return;
     if (markers.some((marker) => Math.abs(marker - position) < 0.006)) return;
     const rounded = Number(position.toFixed(4));
     const next = [...markers, rounded].sort((a, b) => a - b);
@@ -837,7 +904,7 @@ function SampleModal({
       setStatus("12 slices use 11 chop marks");
       return;
     }
-    const rounded = Number(Math.max(0.01, Math.min(0.99, position)).toFixed(4));
+    const rounded = Number(Math.max(trimStart + 0.005, Math.min(trimEnd - 0.005, position)).toFixed(4));
     const next = [...markers];
     next[slotIndex] = rounded;
     const sorted = next
@@ -855,6 +922,12 @@ function SampleModal({
     const marker = markerFromEvent(event);
     const nearest = nearestMarkerIndex(marker);
     canvasRef.current.setPointerCapture(event.pointerId);
+    const trimHandle = nearestTrimHandle(marker);
+    if (trimHandle) {
+      setDraggingTrim(trimHandle);
+      setStatus(trimHandle === "start" ? "Adjusting trim start" : "Adjusting trim end");
+      return;
+    }
     if (nearest >= 0) {
       removeMarker(nearest);
       return;
@@ -863,16 +936,30 @@ function SampleModal({
   }
 
   function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
-    event.preventDefault();
+    if (!audioBuffer || !draggingTrim) return;
+    const position = markerFromEvent(event);
+    if (draggingTrim === "start") {
+      const next = Math.max(0, Math.min(trimEnd - 0.01, position));
+      setTrimStart(Number(next.toFixed(4)));
+      setMarkers((current) => current.filter((marker) => marker > next && marker < trimEnd));
+      setStatus(`Trim start ${(next * (audioBuffer?.duration || 0)).toFixed(2)}s`);
+    } else {
+      const next = Math.min(1, Math.max(trimStart + 0.01, position));
+      setTrimEnd(Number(next.toFixed(4)));
+      setMarkers((current) => current.filter((marker) => marker > trimStart && marker < next));
+      setStatus(`Trim end ${(next * (audioBuffer?.duration || 0)).toFixed(2)}s`);
+    }
   }
 
   function pointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     canvasRef.current?.releasePointerCapture(event.pointerId);
+    setDraggingTrim(null);
   }
 
   function equalChops(count: number) {
     if (!audioBuffer) return;
-    setMarkers(Array.from({ length: count - 1 }, (_, index) => (index + 1) / count));
+    const length = trimEnd - trimStart;
+    setMarkers(Array.from({ length: count - 1 }, (_, index) => trimStart + ((index + 1) / count) * length));
     setSelectedMarker(null);
     setStartChopSet(true);
     setStatus(`${count} equal chops`);
@@ -886,9 +973,11 @@ function SampleModal({
     setStatus(`${autoChopMarkers.length + 1} autochops at threshold ${autoChopSensitivity}`);
   }
 
-  function play(start = 0, duration?: number, sliceIndex?: number) {
+  function play(start?: number, duration?: number, sliceIndex?: number) {
     if (!audioBuffer) return;
     stopPlayback();
+    const startSeconds = start ?? trimStart * audioBuffer.duration;
+    const durationSeconds = duration ?? (trimEnd - trimStart) * audioBuffer.duration;
     const context = new AudioContext();
     const sourceNode = context.createBufferSource();
     sourceNode.buffer = audioBuffer;
@@ -900,8 +989,8 @@ function SampleModal({
       setActiveSlice(null);
       setIsPlaying(false);
     });
-    sourceNode.start(0, start, duration);
-    playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: start, duration };
+    sourceNode.start(0, startSeconds, durationSeconds);
+    playbackRef.current = { context, source: sourceNode, startedAt: context.currentTime, offset: startSeconds, duration: durationSeconds };
     setActiveSlice(sliceIndex ?? null);
     setIsPlaying(true);
   }
@@ -934,8 +1023,8 @@ function SampleModal({
     if (keyIndex === 0) {
       if (!startChopSet) {
         setStartChopSet(true);
-        play(0);
-        setStatus("Chop 1 set at 0.00s");
+        play();
+        setStatus(`Chop 1 set at ${(trimStart * audioBuffer.duration).toFixed(2)}s`);
         return;
       }
       playSlice(0);
@@ -1017,15 +1106,23 @@ function SampleModal({
     return new File([encodeWav(channels, audioBuffer.sampleRate)], name, { type: "audio/wav" });
   }
 
+  function cleanSliceName(name: string, fallback: string) {
+    return (name || fallback)
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9 _.-]+/gi, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 54) || fallback;
+  }
+
   function renderChops() {
     if (!audioBuffer) return [];
-    const points = [0, ...markers, 1].sort((a, b) => a - b);
-    return points.flatMap((point, index) => {
-      if (index >= points.length - 1) return [];
-      const start = Math.floor(point * audioBuffer.length);
-      const end = Math.floor(points[index + 1] * audioBuffer.length);
+    return slices.flatMap((slice, index) => {
+      const start = Math.floor(slice.start * audioBuffer.length);
+      const end = Math.floor(slice.end * audioBuffer.length);
       if (end - start < audioBuffer.sampleRate * 0.015) return [];
-      const file = renderSlice(start, end, `sample_chop_${String(index + 1).padStart(2, "0")}.wav`);
+      const fallback = `sample_chop_${String(index + 1).padStart(2, "0")}`;
+      const file = renderSlice(start, end, `${cleanSliceName(slice.name, fallback)}.wav`);
       return file ? [file] : [];
     }).slice(0, 12);
   }
@@ -1099,6 +1196,68 @@ function SampleModal({
               onPointerCancel={pointerUp}
               className="h-[360px] w-full touch-none rounded-lg border bg-zinc-950 shadow-inner"
             />
+            <div className="grid gap-3 rounded-lg border bg-muted/25 p-3">
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Zoom
+                  <input
+                    type="range"
+                    min={1}
+                    max={8}
+                    step={0.25}
+                    value={zoom}
+                    onChange={(event) => {
+                      setZoom(Number(event.target.value));
+                      setPan((current) => Math.min(1, current));
+                    }}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Pan
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.001}
+                    value={pan}
+                    disabled={zoom <= 1}
+                    onChange={(event) => setPan(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Trim in {audioBuffer ? (trimStart * audioBuffer.duration).toFixed(2) : "0.00"}s
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, trimEnd - 0.01)}
+                    step={0.001}
+                    value={trimStart}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setTrimStart(next);
+                      setMarkers((current) => current.filter((marker) => marker > next && marker < trimEnd));
+                    }}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Trim out {audioBuffer ? (trimEnd * audioBuffer.duration).toFixed(2) : "0.00"}s
+                  <input
+                    type="range"
+                    min={Math.min(1, trimStart + 0.01)}
+                    max={1}
+                    step={0.001}
+                    value={trimEnd}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setTrimEnd(next);
+                      setMarkers((current) => current.filter((marker) => marker > trimStart && marker < next));
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
             <div className="grid grid-cols-6 gap-2 sm:grid-cols-12">
               {samplerSliceKeys.map((key, index) => {
                 const slice = slices[index];
@@ -1207,18 +1366,27 @@ function SampleModal({
 
             <div className="grid max-h-48 gap-2 overflow-auto rounded-lg border bg-muted/25 p-2">
               {slices.map((slice) => (
-                <button
+                <div
                   key={`${slice.start}-${slice.end}`}
                   className={cn(
-                    "flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-xs hover:border-primary",
+                    "grid gap-1 rounded-md border bg-background px-2 py-1.5 text-xs hover:border-primary",
                     activeSlice === slice.index && "border-primary bg-primary/10",
                   )}
-                  onClick={() => playSlice(slice.index)}
-                  disabled={!audioBuffer}
                 >
-                  <span>{samplerSliceKeys[slice.index]?.label || slice.index + 1} · Slice {String(slice.index + 1).padStart(2, "0")}</span>
-                  <span className="text-muted-foreground">{slice.duration.toFixed(2)}s</span>
-                </button>
+                  <button
+                    className="flex items-center justify-between gap-2 text-left"
+                    onClick={() => playSlice(slice.index)}
+                    disabled={!audioBuffer}
+                  >
+                    <span>{samplerSliceKeys[slice.index]?.label || slice.index + 1} · Slice {String(slice.index + 1).padStart(2, "0")}</span>
+                    <span className="text-muted-foreground">{slice.duration.toFixed(2)}s</span>
+                  </button>
+                  <input
+                    className="h-7 rounded border bg-muted/20 px-2 text-xs text-foreground"
+                    value={slice.name}
+                    onChange={(event) => setSliceNames((current) => ({ ...current, [slice.index]: event.target.value }))}
+                  />
+                </div>
               ))}
             </div>
           </div>
