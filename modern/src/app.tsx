@@ -88,6 +88,39 @@ const samplerSliceKeys = [
   { code: "Equal", label: "´" },
 ] as const;
 
+const koPadLabelsBySequence = [".", "0", "ENTER", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+const koPadVisualOrder = ["10", "11", "12", "07", "08", "09", "04", "05", "06", "01", "02", "03"] as const;
+
+function padSequenceIndex(padNumber?: string | number | null) {
+  const value = Number(padNumber);
+  return Number.isFinite(value) ? Math.max(0, Math.min(11, value - 1)) : 0;
+}
+
+function padDisplayLabel(padNumber?: string | number | null) {
+  if (padNumber == null || padNumber === "") return "--";
+  return koPadLabelsBySequence[padSequenceIndex(padNumber)] || String(padNumber || "--");
+}
+
+function padRangeLabel(startPadNumber?: string | number | null, count = 1) {
+  const start = padSequenceIndex(startPadNumber);
+  const end = Math.min(11, start + Math.max(1, count) - 1);
+  return start === end
+    ? `pad ${koPadLabelsBySequence[start]}`
+    : `pads ${koPadLabelsBySequence[start]}-${koPadLabelsBySequence[end]}`;
+}
+
+function sortPadsForDisplay(pads: Pad[]) {
+  const order = new Map(koPadVisualOrder.map((padNumber, index) => [padNumber, index]));
+  return [...pads].sort((a, b) => (order.get(a.number) ?? 99) - (order.get(b.number) ?? 99));
+}
+
+function padsFromSequenceStart(pads: Pad[], startPadNumber?: string | number | null) {
+  const start = padSequenceIndex(startPadNumber);
+  return [...pads]
+    .sort((a, b) => padSequenceIndex(a.number) - padSequenceIndex(b.number))
+    .filter((pad) => padSequenceIndex(pad.number) >= start);
+}
+
 const samplerProcessToggles: { key: keyof Pick<SampleSettings, "normalize" | "trim" | "mono" | "lofi" | "lowCut" | "highCut">; label: string }[] = [
   { key: "normalize", label: "Normalize" },
   { key: "trim", label: "Trim" },
@@ -347,11 +380,13 @@ function PadGrid({
   onSelectPad: (pad: string) => void;
   onDropPad: (pad: Pad, files: File[]) => void;
 }) {
+  const displayPads = sortPadsForDisplay(pads);
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {pads.map((pad) => {
+    <div className="grid grid-cols-3 gap-3">
+      {displayPads.map((pad) => {
         const empty = !pad.name;
         const selected = selectedPad === pad.number;
+        const label = padDisplayLabel(pad.number);
         return (
           <button
             key={pad.number}
@@ -369,7 +404,7 @@ function PadGrid({
             )}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-primary">PAD {pad.number}</span>
+              <span className="text-xs font-semibold text-primary">PAD {label}</span>
               <CircleDot className={cn("h-3.5 w-3.5", empty ? "text-muted-foreground" : "text-emerald-500")} />
             </div>
             <div className="mt-4 truncate text-sm font-medium">{pad.name || "empty"}</div>
@@ -462,11 +497,10 @@ function SampleModal({
   }, [stopRecordingMonitor]);
 
   const targetPadNumber = Math.max(1, Math.min(12, Number(pad?.number || 1)));
+  const targetPadLabel = padDisplayLabel(pad?.number);
   const maxChops = Math.max(1, 13 - targetPadNumber);
   const maxMarkers = Math.max(0, maxChops - 1);
-  const targetPadRange = maxChops === 1
-    ? `pad ${targetPadNumber}`
-    : `pads ${targetPadNumber}-${targetPadNumber + maxChops - 1}`;
+  const targetPadRange = padRangeLabel(pad?.number, maxChops);
   const visibleDuration = 1 / zoom;
   const viewStart = pan * Math.max(0, 1 - visibleDuration);
   const viewEnd = Math.min(1, viewStart + visibleDuration);
@@ -1264,7 +1298,7 @@ function SampleModal({
   function handleChopKey(keyIndex: number, keyLabel: string) {
     if (!audioBuffer) return;
     if (keyIndex >= maxChops) {
-      setStatus(`${targetPadRange} can take ${maxChops} chop${maxChops === 1 ? "" : "s"} from selected pad ${targetPadNumber}`);
+      setStatus(`${targetPadRange} can take ${maxChops} chop${maxChops === 1 ? "" : "s"} from selected pad ${targetPadLabel}`);
       return;
     }
     if (keyIndex === 0) {
@@ -1407,7 +1441,7 @@ function SampleModal({
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4">
       <div className="max-h-[94vh] w-full max-w-6xl overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b p-4">
-          <SectionTitle icon={AudioWaveform} title={`Sampler Pad ${pad?.number || "--"}`} description={`${slices.length} slice${slices.length === 1 ? "" : "s"} ready for keyboard playback and pad assignment.`} />
+          <SectionTitle icon={AudioWaveform} title={`Sampler Pad ${targetPadLabel}`} description={`${slices.length} slice${slices.length === 1 ? "" : "s"} ready for keyboard playback and pad assignment.`} />
           <Button variant="secondary" onClick={onClose}>Close</Button>
         </div>
         <div className="grid max-h-[calc(94vh-73px)] gap-4 overflow-auto p-4 xl:grid-cols-[1fr_310px]">
@@ -1428,7 +1462,7 @@ function SampleModal({
               <Button variant="outline" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>
               <Button variant="outline" onClick={() => isPlaying ? stopPlayback() : play()}>{isPlaying ? "Stop" : "Play"}</Button>
               <Button variant="outline" onClick={clearSample}><Trash2 className="h-4 w-4" /> Clear sample</Button>
-              <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {Number(pad?.number || 1)}</Button>
+              <Button onClick={assign}><Upload className="h-4 w-4" /> Assign to pad {targetPadLabel}</Button>
               <input
                 ref={fileInput}
                 type="file"
@@ -1527,7 +1561,7 @@ function SampleModal({
                   >
                     <span className="text-sm font-semibold">{key.label}</span>
                     <span className="truncate text-muted-foreground">{index >= maxChops ? "No pad" : index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}${slice.reversed ? " · R" : ""}` : "Empty"}</span>
-                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${targetPadNumber + index}` : "Limit"}</span>
+                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${padDisplayLabel(targetPadNumber + index)}` : "Limit"}</span>
                   </button>
                 );
               })}
@@ -1992,7 +2026,7 @@ function Workspace({
 
   const uploadFiles = useCallback(
     async (files: File[], targetPads?: Pad[]) => {
-      const pads = targetPads || engine.pads;
+      const pads = targetPads || padsFromSequenceStart(engine.pads);
       const upload = preparePadUpload(files, pads, engine, padUploadSlotChoice);
       if (!upload) return;
       await engine.uploadToPads(upload.files, upload.pads, upload.slotTarget);
@@ -2128,7 +2162,7 @@ function Workspace({
 
         <Card>
           <CardHeader>
-            <CardTitle>Pad {selected?.number || "--"}</CardTitle>
+            <CardTitle>Pad {padDisplayLabel(selected?.number)}</CardTitle>
             <CardDescription>{selected?.name || "empty"} {selected?.assignedPath ? `- ${selected.type}` : ""}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -2342,7 +2376,7 @@ export function App() {
         setSettings={setSettings}
         onClose={() => setSamplerOpen(false)}
         onUpload={(files, startPad) => {
-          const upload = preparePadUpload(files, engine.pads.slice(startPad - 1, startPad - 1 + files.length), engine, padUploadSlotChoice);
+          const upload = preparePadUpload(files, padsFromSequenceStart(engine.pads, startPad), engine, padUploadSlotChoice);
           if (!upload) return;
           void engine.uploadToPads(upload.files, upload.pads, upload.slotTarget);
           setSamplerOpen(false);
