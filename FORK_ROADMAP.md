@@ -163,7 +163,7 @@ Implemented:
 - Add manual chop markers by clicking the waveform.
 - Select and drag chop markers directly on the waveform.
 - Move selected chop markers with left/right arrow keys.
-- Remove chop markers from the marker hover `x`, with automatic renumbering.
+- Remove chop markers from the marker hover `x` or Delete/Backspace for the selected chop, with automatic renumbering.
 - Generate 4, 8, or 12 equal chops.
 - Autochop suggestion from amplitude onsets with selectable threshold and predicted chop count.
 - Keyboard chop workflow treats `1` as the sample start and `2`-`´` as later chop starts that can be added or overwritten during playback.

@@ -608,7 +608,7 @@ function SampleModal({
       ctx.fillStyle = selected ? "#071b16" : "#fff7ef";
       ctx.font = "10px sans-serif";
       ctx.fillText(String(index + 2), x - 3, 20);
-      if (hovered || selected) {
+      if (hovered) {
         ctx.fillStyle = "rgba(7, 27, 22, 0.92)";
         ctx.fillRect(x + 12, 7, 18, 18);
         ctx.strokeStyle = "#f15a3b";
@@ -1055,6 +1055,7 @@ function SampleModal({
   function playSlice(index: number) {
     const slice = slices[index];
     if (!audioBuffer || !slice) return;
+    setSelectedMarker(index > 0 ? index - 1 : null);
     play(slice.start * audioBuffer.duration, slice.duration, index);
     setStatus(`Playing slice ${String(index + 1).padStart(2, "0")}`);
   }
@@ -1131,6 +1132,11 @@ function SampleModal({
       if ((event.code === "ArrowLeft" || event.code === "ArrowRight") && selectedMarker != null) {
         event.preventDefault();
         moveSelectedMarker(event.code === "ArrowLeft" ? -1 : 1, event.shiftKey);
+        return;
+      }
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedMarker != null) {
+        event.preventDefault();
+        removeMarker(selectedMarker);
         return;
       }
       if (event.code === "Space") {
