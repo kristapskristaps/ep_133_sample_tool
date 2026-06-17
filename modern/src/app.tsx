@@ -88,25 +88,41 @@ const samplerSliceKeys = [
   { code: "Equal", label: "´" },
 ] as const;
 
-const koPadLabelsBySequence = [".", "0", "ENTER", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
-const koPadVisualOrder = ["10", "11", "12", "07", "08", "09", "04", "05", "06", "01", "02", "03"] as const;
+const koPadLabelsByInternalPad = ["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "ENTER"] as const;
+const koPadSequenceOrder = ["10", "11", "12", "07", "08", "09", "04", "05", "06", "01", "02", "03"] as const;
+const koPadVisualOrder = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"] as const;
 
-function padSequenceIndex(padNumber?: string | number | null) {
+function normalizedPadNumber(padNumber?: string | number | null) {
+  const value = Number(padNumber);
+  return Number.isFinite(value) ? String(Math.max(1, Math.min(12, value))).padStart(2, "0") : "";
+}
+
+function padInternalIndex(padNumber?: string | number | null) {
   const value = Number(padNumber);
   return Number.isFinite(value) ? Math.max(0, Math.min(11, value - 1)) : 0;
 }
 
+function padSequenceIndex(padNumber?: string | number | null) {
+  const normalized = normalizedPadNumber(padNumber);
+  const index = koPadSequenceOrder.indexOf(normalized as (typeof koPadSequenceOrder)[number]);
+  return index >= 0 ? index : 0;
+}
+
 function padDisplayLabel(padNumber?: string | number | null) {
   if (padNumber == null || padNumber === "") return "--";
-  return koPadLabelsBySequence[padSequenceIndex(padNumber)] || String(padNumber || "--");
+  return koPadLabelsByInternalPad[padInternalIndex(padNumber)] || String(padNumber || "--");
+}
+
+function padSequenceLabel(index: number) {
+  return padDisplayLabel(koPadSequenceOrder[Math.max(0, Math.min(11, index))]);
 }
 
 function padRangeLabel(startPadNumber?: string | number | null, count = 1) {
   const start = padSequenceIndex(startPadNumber);
   const end = Math.min(11, start + Math.max(1, count) - 1);
   return start === end
-    ? `pad ${koPadLabelsBySequence[start]}`
-    : `pads ${koPadLabelsBySequence[start]}-${koPadLabelsBySequence[end]}`;
+    ? `pad ${padSequenceLabel(start)}`
+    : `pads ${padSequenceLabel(start)}-${padSequenceLabel(end)}`;
 }
 
 function sortPadsForDisplay(pads: Pad[]) {
@@ -501,9 +517,9 @@ function SampleModal({
     setRecordingState("idle");
   }, [stopRecordingMonitor]);
 
-  const targetPadNumber = Math.max(1, Math.min(12, Number(pad?.number || 1)));
+  const targetPadSequenceIndex = padSequenceIndex(pad?.number);
   const targetPadLabel = padDisplayLabel(pad?.number);
-  const maxChops = Math.max(1, 13 - targetPadNumber);
+  const maxChops = Math.max(1, 12 - targetPadSequenceIndex);
   const maxMarkers = Math.max(0, maxChops - 1);
   const targetPadRange = padRangeLabel(pad?.number, maxChops);
   const visibleDuration = 1 / zoom;
@@ -1588,7 +1604,7 @@ function SampleModal({
                   >
                     <span className="text-sm font-semibold">{key.label}</span>
                     <span className="truncate text-muted-foreground">{index >= maxChops ? "No pad" : index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}${slice.reversed ? " · R" : ""}` : "Empty"}</span>
-                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${padDisplayLabel(targetPadNumber + index)}` : "Limit"}</span>
+                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${padSequenceLabel(targetPadSequenceIndex + index)}` : "Limit"}</span>
                   </button>
                 );
               })}
@@ -2315,7 +2331,7 @@ export function App() {
   const engine = useDeviceEngine();
   const autoConnectStarted = useRef(false);
   const [view, setView] = useState<"project" | "library">("project");
-  const [selectedPad, setSelectedPad] = useState("01");
+  const [selectedPad, setSelectedPad] = useState("10");
   const [settings, setSettings] = useState<SampleSettings>(() => loadInitialSampleSettings());
   const [padUploadSlotChoice, setPadUploadSlotChoice] = useState<PadUploadSlotChoice>(() => defaultPadUploadSlotChoice);
   const [samplerOpen, setSamplerOpen] = useState(false);

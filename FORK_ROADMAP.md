@@ -177,7 +177,7 @@ Implemented:
 - Sampler playback previews enabled low/high cut, mono, gain, and lo-fi processing before assignment.
 - Reverse individual chops from the Processing panel or the `R` key; reversed chops draw with reversed waveform peaks and export reversed.
 - Lo-Fi processing has Soft, Grit, and Wreck profiles with progressively lower sample rate and bit depth.
-- Pad UI labels and sampler assignment ranges follow the K.O. pad face: `7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER`.
+- Pad UI labels map EP internal pads top-left to bottom-right onto the K.O. face: `7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER`.
 - Render chops as WAV files.
 - Assign rendered chops to pads starting from the selected pad.
 
