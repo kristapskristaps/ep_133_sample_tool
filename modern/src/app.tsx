@@ -390,7 +390,6 @@ function SampleModal({
   const recordingChunksRef = useRef<Float32Array[][]>([]);
   const recordingStartedRef = useRef(false);
   const [source, setSource] = useState<"system" | "mic">("system");
-  const [mode, setMode] = useState<"edit" | "manual" | "perform">("manual");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [markers, setMarkers] = useState<number[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
@@ -444,6 +443,12 @@ function SampleModal({
     setRecordingState("idle");
   }, [stopRecordingMonitor]);
 
+  const targetPadNumber = Math.max(1, Math.min(12, Number(pad?.number || 1)));
+  const maxChops = Math.max(1, 13 - targetPadNumber);
+  const maxMarkers = Math.max(0, maxChops - 1);
+  const targetPadRange = maxChops === 1
+    ? `pad ${targetPadNumber}`
+    : `pads ${targetPadNumber}-${targetPadNumber + maxChops - 1}`;
   const visibleDuration = 1 / zoom;
   const viewStart = pan * Math.max(0, 1 - visibleDuration);
   const viewEnd = Math.min(1, viewStart + visibleDuration);
@@ -474,23 +479,33 @@ function SampleModal({
     const average = energies.reduce((sum, value) => sum + value, 0) / Math.max(1, energies.length);
     const transientRatio = 2.35 - sensitivity * 0.016;
     const averageRatio = 1.85 - sensitivity * 0.012;
-    const next: number[] = [];
+    const candidates: { marker: number; score: number }[] = [];
     let cooldown = 0;
     for (let index = 1; index < energies.length - 1; index++) {
       const localPeak = energies[index] >= energies[index + 1] && energies[index] > energies[index - 1] * transientRatio;
       const strongEnough = energies[index] > average * averageRatio;
       if (cooldown <= 0 && localPeak && strongEnough) {
         const marker = (index * windowSize) / data.length;
-        if (marker > 0.02 && marker < 0.98) next.push(Number(marker.toFixed(4)));
+        if (marker > trimStart + 0.005 && marker < trimEnd - 0.005) {
+          const rise = energies[index] / Math.max(0.00001, energies[index - 1]);
+          const strength = energies[index] / Math.max(0.00001, average);
+          candidates.push({ marker: Number(marker.toFixed(4)), score: rise * strength });
+        }
         cooldown = Math.floor(audioBuffer.sampleRate * 0.1 / windowSize);
       }
       cooldown--;
     }
-    return next.filter((marker) => marker > trimStart + 0.005 && marker < trimEnd - 0.005).slice(0, 11);
-  }, [audioBuffer, trimEnd, trimStart]);
+    const minSpacing = Math.max(0.025, (trimEnd - trimStart) / Math.max(8, maxChops * 2));
+    const selected: number[] = [];
+    for (const candidate of candidates.sort((a, b) => b.score - a.score)) {
+      if (selected.length >= maxMarkers) break;
+      if (selected.every((marker) => Math.abs(marker - candidate.marker) >= minSpacing)) selected.push(candidate.marker);
+    }
+    return selected.sort((a, b) => a - b);
+  }, [audioBuffer, maxChops, maxMarkers, trimEnd, trimStart]);
 
   const autoChopMarkers = useMemo(() => detectTransientMarkers(autoChopSensitivity), [autoChopSensitivity, detectTransientMarkers]);
-  const autoChopCount = audioBuffer ? Math.min(12, autoChopMarkers.length + 1) : 0;
+  const autoChopCount = audioBuffer ? Math.min(maxChops, autoChopMarkers.length + 1) : 0;
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -542,8 +557,6 @@ function SampleModal({
     }
 
     const timeToX = (position: number) => ((position - viewStart) / Math.max(0.001, viewEnd - viewStart)) * rect.width;
-    const visibleTrimStart = timeToX(trimStart);
-    const visibleTrimEnd = timeToX(trimEnd);
 
     slicePoints.slice(0, -1).forEach((start, index) => {
       const end = slicePoints[index + 1];
@@ -681,6 +694,12 @@ function SampleModal({
     window.addEventListener("resize", drawWaveform);
     return () => window.removeEventListener("resize", drawWaveform);
   }, [drawWaveform, open]);
+
+  useEffect(() => {
+    setMarkers((current) => current.slice(0, maxMarkers));
+    setSelectedMarker((current) => current != null && current >= maxMarkers ? null : current);
+    setHoveredMarker((current) => current != null && current >= maxMarkers ? null : current);
+  }, [maxMarkers]);
 
   useEffect(() => () => {
     stopPlayback();
@@ -915,7 +934,7 @@ function SampleModal({
   }
 
   function addMarker(position: number, label = "chops") {
-    if (!audioBuffer || position <= trimStart + 0.005 || position >= trimEnd - 0.005 || markers.length >= 11) return;
+    if (!audioBuffer || position <= trimStart + 0.005 || position >= trimEnd - 0.005 || markers.length >= maxMarkers) return;
     if (markers.some((marker) => Math.abs(marker - position) < 0.006)) return;
     const rounded = Number(position.toFixed(4));
     const next = [...markers, rounded].sort((a, b) => a - b);
@@ -935,8 +954,8 @@ function SampleModal({
 
   function setMarkerSlot(slotIndex: number, position: number, keyLabel: string) {
     if (!audioBuffer) return;
-    if (slotIndex >= 11) {
-      setStatus("12 slices use 11 chop marks");
+    if (slotIndex >= maxMarkers) {
+      setStatus(`${maxChops} chop${maxChops === 1 ? "" : "s"} available from ${targetPadRange}`);
       return;
     }
     const rounded = Number(Math.max(trimStart + 0.005, Math.min(trimEnd - 0.005, position)).toFixed(4));
@@ -944,7 +963,7 @@ function SampleModal({
     next[slotIndex] = rounded;
     const sorted = next
       .filter((marker, index) => index === slotIndex || typeof marker === "number")
-      .slice(0, 11)
+      .slice(0, maxMarkers)
       .sort((a, b) => a - b);
     setMarkers(sorted);
     setSelectedMarker(sorted.findIndex((marker) => marker === rounded));
@@ -1015,11 +1034,12 @@ function SampleModal({
 
   function equalChops(count: number) {
     if (!audioBuffer) return;
+    const safeCount = Math.min(count, maxChops);
     const length = trimEnd - trimStart;
-    setMarkers(Array.from({ length: count - 1 }, (_, index) => trimStart + ((index + 1) / count) * length));
+    setMarkers(Array.from({ length: safeCount - 1 }, (_, index) => trimStart + ((index + 1) / safeCount) * length));
     setSelectedMarker(null);
     setStartChopSet(true);
-    setStatus(`${count} equal chops`);
+    setStatus(`${safeCount} equal chops`);
   }
 
   function transientChops() {
@@ -1070,7 +1090,7 @@ function SampleModal({
     if (!audioBuffer) return;
     const position = playbackPosition();
     if (position == null) {
-      setStatus("Start playback before manual chopping");
+      setStatus("Start playback before setting chops");
       return;
     }
     setMarkerSlot(markerIndex, position / audioBuffer.duration, keyLabel);
@@ -1091,6 +1111,10 @@ function SampleModal({
 
   function handleChopKey(keyIndex: number, keyLabel: string) {
     if (!audioBuffer) return;
+    if (keyIndex >= maxChops) {
+      setStatus(`${targetPadRange} can take ${maxChops} chop${maxChops === 1 ? "" : "s"} from selected pad ${targetPadNumber}`);
+      return;
+    }
     if (keyIndex === 0) {
       if (!startChopSet) {
         setStartChopSet(true);
@@ -1206,7 +1230,7 @@ function SampleModal({
       const fallback = `sample_chop_${String(index + 1).padStart(2, "0")}`;
       const file = renderSlice(start, end, `${cleanSliceName(slice.name, fallback)}.wav`);
       return file ? [file] : [];
-    }).slice(0, 12);
+    }).slice(0, maxChops);
   }
 
   function assign() {
@@ -1230,20 +1254,8 @@ function SampleModal({
         <div className="grid max-h-[calc(94vh-73px)] gap-4 overflow-auto p-4 xl:grid-cols-[1fr_310px]">
           <div className="grid content-start gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { value: "edit", label: "Edit" },
-                  { value: "manual", label: "Manual Chop" },
-                  { value: "perform", label: "Perform" },
-                ].map((option) => (
-                  <Button
-                    key={option.value}
-                    variant={mode === option.value ? "default" : "outline"}
-                    onClick={() => setMode(option.value as typeof mode)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
+              <div className="rounded-md border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+                Target {targetPadRange}: {maxChops} chop{maxChops === 1 ? "" : "s"} available
               </div>
               <div className="text-xs text-muted-foreground">
                 {audioBuffer ? `${audioBuffer.duration.toFixed(2)}s / ${audioBuffer.sampleRate} Hz` : status}
@@ -1352,32 +1364,33 @@ function SampleModal({
                       activeSlice === index && "border-primary bg-primary/10",
                     )}
                     onClick={() => handleChopKey(index, key.label)}
-                    disabled={!audioBuffer || (index > 0 && !isPlaying && !(startChopSet && slice))}
+                    disabled={!audioBuffer || index >= maxChops || (index > 0 && !isPlaying && !(startChopSet && slice))}
                   >
                     <span className="text-sm font-semibold">{key.label}</span>
-                    <span className="truncate text-muted-foreground">{index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
-                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : `Pad ${Number(pad?.number || 1) + index}`}</span>
+                    <span className="truncate text-muted-foreground">{index >= maxChops ? "No pad" : index === 0 && !startChopSet ? "Set chop 1" : slice ? `Chop ${String(index + 1).padStart(2, "0")}` : "Empty"}</span>
+                    <span className="text-muted-foreground">{slice && startChopSet ? `${slice.duration.toFixed(2)}s` : index < maxChops ? `Pad ${targetPadNumber + index}` : "Limit"}</span>
                   </button>
                 );
               })}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <span>{status}</span>
-              <span>Space starts/stops without setting chop 1. Press 1 to set the start, then press 2-´ while playing to add or overwrite chops.</span>
+              <span>Space starts/stops without setting chop 1. Press 1 to set the start; available keys map to {targetPadRange}.</span>
             </div>
           </div>
           <div className="grid content-start gap-3">
             <div className="grid gap-2 rounded-lg border bg-muted/25 p-3">
               <div className="text-sm font-semibold">Chop</div>
-              <div className="grid grid-cols-3 gap-2">
-                <Button variant="outline" onClick={() => equalChops(4)}>4</Button>
-                <Button variant="outline" onClick={() => equalChops(8)}>8</Button>
-                <Button variant="outline" onClick={() => equalChops(12)}>12</Button>
+              <div className="grid grid-cols-4 gap-2">
+                <Button variant="outline" onClick={() => equalChops(4)} disabled={maxChops < 4}>4</Button>
+                <Button variant="outline" onClick={() => equalChops(8)} disabled={maxChops < 8}>8</Button>
+                <Button variant="outline" onClick={() => equalChops(12)} disabled={maxChops < 12}>12</Button>
+                <Button variant="outline" onClick={() => equalChops(maxChops)}>{maxChops}</Button>
               </div>
               <div className="grid gap-2 rounded-md border bg-background p-2">
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="font-medium text-foreground">Autochop threshold</span>
-                  <span className="text-muted-foreground">{audioBuffer ? `${autoChopCount} chop${autoChopCount === 1 ? "" : "s"}` : "load audio"}</span>
+                  <span className="text-muted-foreground">{audioBuffer ? `${autoChopCount}/${maxChops} chop${autoChopCount === 1 ? "" : "s"}` : "load audio"}</span>
                 </div>
                 <input
                   type="range"
@@ -1390,6 +1403,9 @@ function SampleModal({
                   <span>fewer</span>
                   <span>{autoChopSensitivity}</span>
                   <span>more</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Scores onsets across the trimmed sample, keeps the strongest spaced peaks, then sorts them in time.
                 </div>
               </div>
               <Button variant="outline" className="justify-start" onClick={transientChops}><Scissors className="h-4 w-4" /> Autochop</Button>

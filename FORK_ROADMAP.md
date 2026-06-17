@@ -165,9 +165,10 @@ Implemented:
 - Move selected chop markers with left/right arrow keys.
 - Remove chop markers from the marker hover `x` or Delete/Backspace for the selected chop, with automatic renumbering.
 - Generate 4, 8, or 12 equal chops.
-- Autochop suggestion from amplitude onsets with selectable threshold and predicted chop count.
+- Autochop scores onsets across the trimmed sample, keeps the strongest spaced peaks, and shows selectable threshold plus predicted chop count.
 - Keyboard chop workflow treats `1` as the sample start and `2`-`´` as later chop starts that can be added or overwritten during playback.
 - Keyboard slice playback uses `1 2 3 4 5 6 7 8 9 0 ß ´` for up to 12 slices.
+- Chop count is capped by the number of pads available from the selected target pad through pad 12.
 - Audition individual slices before assignment.
 - Sampler waveform shows slice regions, marker handles, selected markers, active slices, and playback position.
 - Sampler waveform supports zoom, pan, and trim in/out handles.
