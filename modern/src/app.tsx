@@ -1393,11 +1393,6 @@ function SampleModal({
       return;
     }
     const existingChopCount = startChopSet ? slices.length : 0;
-    const redoMarkerIndex = Math.max(0, existingChopCount - 2);
-    if (playbackRef.current && startChopSet && keyIndex === existingChopCount - 1 && existingChopCount > 1) {
-      stampChopMarker(redoMarkerIndex, keyLabel);
-      return;
-    }
     if (playbackRef.current && (!startChopSet || keyIndex >= existingChopCount)) {
       stampChopMarker(keyIndex - 1, keyLabel);
       return;
