@@ -1120,7 +1120,8 @@ function SampleModal({
       });
       return updated;
     });
-    setSelectedMarker(null);
+    setSelectedMarker(next.length ? next.length - 1 : null);
+    setStartChopSet(next.length > 0);
     setStatus(`${next.length + 1} chops`);
   }
 

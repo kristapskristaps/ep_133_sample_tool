@@ -165,6 +165,7 @@ Implemented:
 - Select and drag chop markers directly on the waveform.
 - Move selected chop markers with left/right arrow keys.
 - Remove chop markers from the marker hover `x` or Delete/Backspace for the selected chop, with automatic renumbering.
+- After deleting a chop marker, select the last remaining chop slot so keyboard editing can continue.
 - Generate 4, 8, or 12 equal chops.
 - Autochop scores onsets across the trimmed sample, keeps the strongest spaced peaks, and shows selectable threshold plus predicted chop count.
 - Keyboard chop workflow treats `1` as the sample start; existing chop keys play slices, and higher unused keys add later chop starts during playback.
